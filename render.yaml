@@ -16,7 +16,3 @@ services:
       # or set it in the Render dashboard instead of committing a password.
       - key: DIAMONDSCORER_AUTH
         sync: false
-    disk:
-      name: diamond-scorer-data
-      mountPath: /var/data
-      sizeGB: 1
