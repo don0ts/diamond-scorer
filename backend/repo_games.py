@@ -357,9 +357,15 @@ _EDITABLE_FIELDS = (
 
 
 def update_event(game_id: int, event_id: int, data: dict) -> dict:
-    """In-place edit of a single event (feature 3). Base ``advances`` are NOT
-    edited here \u2014 to change how runners moved, delete the play and re-record
-    it. Only scalar scoring fields are patched."""
+    """In-place edit of a single event (feature 3).
+
+    Editing a play now RE-ENTERS it: besides the scalar scoring fields, the
+    base ``advances`` snapshot and error attribution are rewritten so the
+    play's effect on bases / outs / runs is recomputed from scratch (e.g.
+    changing a single to a strikeout clears the batter off first base; a
+    strikeout changed to a triple puts the batter on third). ``compute_state``
+    reads each event's ``advances`` snapshot, so persisting it here is what
+    makes the base state follow the edited result."""
     c = get_conn()
     ev = c.execute("SELECT * FROM game_events WHERE id=? AND game_id=?",
                    (event_id, game_id)).fetchone()
@@ -370,6 +376,38 @@ def update_event(game_id: int, event_id: int, data: dict) -> dict:
         if f in data:
             sets.append(f"{f}=?")
             vals.append(data[f])
+    # Base-running snapshot: {"1": pid, "2": pid, "3": pid}. Stored as JSON
+    # (NULL when explicitly cleared) so the replay engine picks up the new
+    # base state produced by the re-entered play.
+    if "advances" in data:
+        adv = data["advances"]
+        sets.append("advances=?")
+        vals.append(json.dumps(adv) if adv is not None else None)
+    # Error attribution can change when the result changes (e.g. a hit edited
+    # into a reached-on-error, or vice versa).
+    if "is_error" in data or "errors_json" in data or "error_on" in data:
+        errs = data.get("errors_json")
+        if errs is None and data.get("error_on") is not None:
+            errs = [data.get("error_on")]
+        err_list = None
+        if errs:
+            seen = []
+            for x in errs:
+                try:
+                    xi = int(x)
+                except (TypeError, ValueError):
+                    continue
+                if xi not in seen:
+                    seen.append(xi)
+            err_list = seen or None
+        primary_err = data.get("error_on")
+        if primary_err is None and err_list:
+            primary_err = err_list[0]
+        is_err = 1 if (data.get("is_error") or err_list) else 0
+        sets.append("is_error=?"); vals.append(is_err)
+        sets.append("error_on=?"); vals.append(primary_err)
+        sets.append("errors_json=?")
+        vals.append(json.dumps(err_list) if err_list else None)
     if sets:
         vals.extend([event_id, game_id])
         c.execute(f"UPDATE game_events SET {', '.join(sets)} WHERE id=? AND game_id=?",

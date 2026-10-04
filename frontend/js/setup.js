@@ -27,14 +27,19 @@ const Setup = (() => {
     const homeRoster = S.homeId ? await API.roster(S.seasonId, S.homeId) : [];
 
     // Feature 1: four-phase tab navigation League → Game → Lineups → Scoring.
+    // Step-by-step: the Game step is locked until a league AND season are
+    // chosen, and Lineups/Scoring stay locked until the game is ready, so
+    // steps cannot be skipped.
+    const canGame = !!(S.leagueId && S.seasonId);
     const gameReady = !!(S.awayId && S.homeId && S.awayId !== S.homeId
       && awayRoster.length && homeRoster.length);
+    if ((S.tab === 'game' || S.tab === 'lineups' || S.tab === 'scoring') && !canGame) S.tab = 'league';
     if ((S.tab === 'lineups' || S.tab === 'scoring') && !gameReady) S.tab = 'game';
-    const tabsBar = setupTabs(gameReady);
+    const tabsBar = setupTabs(canGame, gameReady);
 
     let sections = '';
     if (S.tab === 'league') {
-      sections = leagueSection(leagues) + seasonSection(seasons);
+      sections = leagueSection(leagues) + seasonSection(seasons) + leagueNextRow();
     } else if (S.tab === 'game') {
       sections = teamsSection(teams) + rosterSection(teams, awayRoster, homeRoster)
         + gameSection(awayRoster, homeRoster);
@@ -63,14 +68,27 @@ const Setup = (() => {
     {key:'lineups', label:'Lineups', ico:'\uD83D\uDCCB'},
     {key:'scoring', label:'Scoring', ico:'\u26BE'},
   ];
-  function setupTabs(gameReady) {
+  function setupTabs(canGame, gameReady) {
     const btns = TABS.map((t) => {
-      const locked = (t.key === 'lineups' || t.key === 'scoring') && !gameReady;
+      const locked = (t.key === 'game' && !canGame)
+        || ((t.key === 'lineups' || t.key === 'scoring') && !gameReady);
       return `<button class="setup-tab ${S.tab===t.key?'active':''} ${locked?'is-locked':''}"
         data-tab="${t.key}" ${locked?'disabled':''}>
         <span class="nav-ico">${t.ico}</span> ${t.label}</button>`;
     }).join('');
     return `<div class="setup-tabs">${btns}</div>`;
+  }
+
+  // Feature: explicit "Next" control on the League step to advance to Game
+  // once a league and season are both selected.
+  function leagueNextRow() {
+    const ready = !!(S.leagueId && S.seasonId);
+    const hint = !S.leagueId ? 'Select or create a league to continue.'
+      : !S.seasonId ? 'Select or create a season to continue.'
+      : 'Ready — continue to the Game step.';
+    return `<div class="setup-row" style="justify-content:flex-end;gap:10px;align-items:center;margin-top:4px">
+      <span class="muted">${UI.esc(hint)}</span>
+      <button class="btn primary" id="wz-next-game" ${ready?'':'disabled'}>Next: Game ›</button></div>`;
   }
 
   function lineupsPhase() {
@@ -180,6 +198,11 @@ const Setup = (() => {
       if (b.disabled) return;
       S.tab = b.dataset.tab; rerender();
     });
+
+    if ($('#wz-next-game')) $('#wz-next-game').onclick = () => {
+      if (!(S.leagueId && S.seasonId)) { UI.toast('Pick a league and season first', 'err'); return; }
+      S.tab = 'game'; rerender();
+    };
 
     if ($('#wz-league')) $('#wz-league').onchange = (e) => {
       S.leagueId = Number(e.target.value) || null; S.seasonId = null;

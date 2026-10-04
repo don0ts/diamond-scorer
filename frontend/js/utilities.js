@@ -38,7 +38,7 @@ const Utilities = (() => {
 
   function onAction(a) {
     if (a === 'new-league') editLeague();
-    else if (a === 'new-team') editTeam();
+    else if (a === 'new-team') createTeam();
     else if (a === 'new-player') createPlayer();
     else if (a === 'export-session') exportSession();
     else if (a === 'import-session') importSession();
@@ -292,7 +292,7 @@ const Utilities = (() => {
     if (!teams.length) {
       body.innerHTML = UI.empty('🧢', 'No teams yet. Teams are global and reusable across leagues and seasons.',
         `<div class="coming-soon"><button class="btn primary" id="e1">+ New Team</button></div>`);
-      body.querySelector('#e1').onclick = () => editTeam(); return;
+      body.querySelector('#e1').onclick = () => createTeam(); return;
     }
     body.innerHTML = `<div class="grid-cards">` + teams.map((t) => `
       <div class="card card-click" data-detail="${t.id}">
@@ -354,6 +354,78 @@ const Utilities = (() => {
       const host = document.getElementById('td-seasons');
       if (host) host.innerHTML = '<p class="muted">Could not load season participation.</p>';
     }
+  }
+
+  // A team can only be created once a League and a Season exist, and the
+  // creation flow REQUIRES assigning the new team to a League -> Season.
+  async function createTeam() {
+    const leagues = await API.leagues().catch(()=>[]);
+    if (!leagues.length) {
+      const go = await UI.confirm('Create a league first',
+        'Teams must belong to a league and season. No leagues exist yet — create a league (and a season in it) before adding a team.',
+        { okLabel: 'Go to Leagues' });
+      if (go) { state.tab = 'leagues'; state.leagueId = null; state.seasonId = null; App.refreshActions(); render(root()); }
+      return;
+    }
+    const leagueOpts = `<option value="">— select league —</option>` +
+      leagues.map((l)=>`<option value="${l.id}">${UI.esc(l.name)}</option>`).join('');
+    UI.openModal(`<div class="modal-head"><h2>New Team</h2>
+      <button class="icon-btn" data-x>×</button></div>
+      <div class="modal-body"><form id="nt-form">
+        <div class="field"><label>Team Name <span style="color:var(--red)">*</span></label><input name="name" placeholder="e.g. River City Rangers" /></div>
+        <div class="grid-2" style="grid-template-columns:1fr 1fr;gap:10px">
+          <div class="field"><label>Abbreviation</label><input name="abbrev" placeholder="RCR" /></div>
+          <div class="field"><label>City</label><input name="city" /></div>
+        </div>
+        <div class="field"><label>Accent Color (hex)</label><input name="color" placeholder="#2f7bff" /></div>
+        <div class="field"><label>Notes</label><textarea name="notes" rows="2"></textarea></div>
+        <h3 style="margin:14px 0 6px">Assign to League &amp; Season <span style="color:var(--red)">*</span></h3>
+        <div class="field"><label>League <span style="color:var(--red)">*</span></label><select id="nt-league">${leagueOpts}</select></div>
+        <div class="field"><label>Season <span style="color:var(--red)">*</span></label><select id="nt-season" disabled><option value="">— pick a league first —</option></select></div>
+        <span class="muted" style="font-size:11px">A team must be assigned to a season. If the league has no seasons yet, create one in the Leagues &amp; Seasons tab first.</span>
+      </form></div>
+      <div class="modal-foot"><button class="btn ghost" data-cancel>Cancel</button>
+        <button class="btn primary" data-ok>Create Team</button></div>`);
+    const m = document.getElementById('modal');
+    const lSel = m.querySelector('#nt-league');
+    const sSel = m.querySelector('#nt-season');
+    lSel.onchange = async () => {
+      sSel.innerHTML = '<option value="">—</option>'; sSel.disabled = true;
+      if (!lSel.value) return;
+      const seasons = await API.seasons(Number(lSel.value)).catch(()=>[]);
+      if (!seasons.length) {
+        sSel.innerHTML = '<option value="">— no seasons in this league —</option>';
+        UI.toast('This league has no seasons yet. Create one first.', 'err');
+        return;
+      }
+      sSel.innerHTML = '<option value="">— select season —</option>' +
+        seasons.map((s)=>`<option value="${s.id}">${UI.esc(s.name)}${s.year?` (${s.year})`:''}</option>`).join('');
+      sSel.disabled = false;
+    };
+    m.querySelector('[data-x]').onclick = UI.closeModal;
+    m.querySelector('[data-cancel]').onclick = UI.closeModal;
+    m.querySelector('[data-ok]').onclick = async () => {
+      const f = m.querySelector('#nt-form');
+      const name = f.name.value.trim();
+      let bad = false;
+      if (!name) { f.name.style.borderColor = 'var(--red)'; bad = true; }
+      if (!lSel.value) { lSel.style.borderColor = 'var(--red)'; bad = true; }
+      if (!sSel.value) { sSel.style.borderColor = 'var(--red)'; bad = true; }
+      if (bad) { UI.toast('Name, league and season are all required', 'err'); return; }
+      const payload = {
+        name,
+        abbrev: f.abbrev.value.trim() || null,
+        city: f.city.value.trim() || null,
+        color: f.color.value.trim() || null,
+        notes: f.notes.value.trim() || null,
+      };
+      try {
+        const t = await API.post('/teams', payload);
+        await API.post(`/seasons/${sSel.value}/teams/${t.id}`);
+        UI.toast('Team created & assigned to season');
+        UI.closeModal(); render(root());
+      } catch (e) { UI.toast(e.message || 'Could not create team', 'err'); }
+    };
   }
 
   async function editTeam(t) {

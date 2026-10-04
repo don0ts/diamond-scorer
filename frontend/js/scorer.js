@@ -549,27 +549,19 @@ const Scorer = (() => {
     const ev = S.events.find((e) => e.id === eid);
     if (!ev) return;
     const kind = ev.kind || 'PA';
+    if (kind === 'SUB') { UI.toast('Edit substitutions from the lineup / subs panel.', 'err'); return; }
+    // Editing RE-ENTERS the play: pick the (possibly new) result, then reopen
+    // the full entry modal seeded with the historical batter/runner and the
+    // pre-play base state so bases, outs and runs recompute from the result.
     const cat = kind === 'BR' ? S.cat.baserunning : S.cat.batting;
-    const resOpts = Object.keys(cat).map((k) => ({ value:k, label:`${k} — ${cat[k].label||k}` }));
-    const v = await UI.formModal('Edit Play', [
-      { key:'result', label:'Result', type:'select', value:ev.result, options:resOpts },
-      { key:'rbi', label:'RBI', type:'number', value:ev.rbi||0 },
-      { key:'outs_recorded', label:'Outs recorded', type:'number', value:ev.outs_recorded||0 },
-      { key:'runs_scored', label:'Runs scored', type:'number', value:ev.runs_scored||0 },
-      { key:'description', label:'Description (optional)', value:ev.description||'' },
+    const resOpts = Object.keys(cat).map((k) => ({ value:k, label:`${k} \u2014 ${cat[k].label||k}` }));
+    const v = await UI.formModal('Edit Play \u2014 choose result', [
+      { key:'result', label:'Result', type:'select', value:ev.result, options:resOpts, required:true },
     ]);
     if (!v) return;
-    const body = {
-      result: v.result || ev.result,
-      rbi: Number(v.rbi)||0,
-      outs_recorded: Number(v.outs_recorded)||0,
-      runs_scored: Number(v.runs_scored)||0,
-      description: (v.description||'').trim() || null,
-    };
-    try {
-      await API.patch(`/games/${S.gameId}/events/${eid}`, body);
-      await reload(); render(); UI.toast('Play updated');
-    } catch (e) { UI.toast(e.message || 'Could not update', 'err'); }
+    const code = v.result || ev.result;
+    if (kind === 'BR') return recordBR(code, ev);
+    return recordPA(code, ev);
   }
 
   async function undo() {
@@ -702,26 +694,46 @@ const Scorer = (() => {
     refresh();
   }
 
-  // Feature 4: when the batter is placed on a base, any runner whose base
-  // becomes double-occupied is force-advanced along the chain to the first
-  // free base (home if pushed past 3rd). Returns {baseNum: destString} for
-  // every currently-occupied runner base; unforced runners default to a hold.
+  // Feature 4: cascading base-force. The batter is the trailing-most runner
+  // (just left home) and ends on `batterBaseNum` (1-3, 4 for home, 0 for an
+  // out). Every runner must finish on a base strictly ahead of the batter and
+  // strictly ahead of the runner behind them, so a batter who reaches base N
+  // sequentially FORCES every trailing runner forward -- e.g. a triple with
+  // runners on 1st/2nd/3rd pushes all three home. Runners already ahead of the
+  // batter with room simply hold. Returns {baseNum: destString} for every
+  // currently-occupied runner base.
   function forcedDest(batterBaseNum, bs) {
-    const occ = new Set();
-    if (batterBaseNum >= 1 && batterBaseNum <= 3) occ.add(batterBaseNum);
     const dest = {};
+    // The lowest base the next (trailing) runner may occupy. Seeds at the
+    // batter's base so every runner the batter catches up to is pushed past it.
+    let prev = (batterBaseNum >= 1 && batterBaseNum <= 4) ? batterBaseNum : 0;
     for (let r = 1; r <= 3; r++) {
       if (!bs[r]) continue;
-      if (occ.has(r)) {
-        let t = r + 1;
-        while (t <= 3 && occ.has(t)) t++;
-        if (t > 3) { dest[r] = 'H'; } else { dest[r] = String(t); occ.add(t); }
-      } else {
-        dest[r] = String(r); // not forced -> hold
-        occ.add(r);
-      }
+      // Hold if already clear of the runner behind; otherwise advance to the
+      // next open base, scoring when pushed past third.
+      let t = Math.max(r, prev + 1);
+      if (t > 3) { dest[r] = 'H'; prev = 4; }
+      else { dest[r] = String(t); prev = t; }
     }
     return dest;
+  }
+
+  // Base state immediately BEFORE a given event, used when re-entering a play
+  // during an edit. compute_state clears the bases between half-innings and
+  // stores an absolute snapshot on every PA/BR event, so the pre-play state is
+  // the snapshot of the latest earlier event in the SAME half-inning (empty if
+  // this is the first play of its half).
+  function preBasesFor(ev) {
+    const empty = { '1': null, '2': null, '3': null };
+    const prior = (S.events || [])
+      .filter((e) => e.seq < ev.seq && e.inning === ev.inning
+        && e.half === ev.half && e.advances)
+      .sort((a, b) => a.seq - b.seq);
+    if (!prior.length) return empty;
+    try {
+      const s = JSON.parse(prior[prior.length - 1].advances);
+      return { '1': s['1'] || null, '2': s['2'] || null, '3': s['3'] || null };
+    } catch (_e) { return empty; }
   }
 
   function destSelect(cls, from, sel) {
@@ -734,13 +746,16 @@ const Scorer = (() => {
     return `<select class="${cls}" data-from="${from}">${o}</select>`;
   }
 
-  async function recordPA(code) {
+  async function recordPA(code, editEv) {
     const g = S.game;
-    if (['final','forfeited'].includes(g.status)) return;
-    const b = currentBatter();
-    if (!b) { UI.toast('Set a batting lineup first', 'err'); return; }
+    if (['final','forfeited'].includes(g.status) && !editEv) return;
+    const isEdit = !!editEv;
+    const b = isEdit
+      ? { player_id: editEv.batter_id, full_name: editEv.batter_name || nameOf(editEv.batter_id) }
+      : currentBatter();
+    if (!b || !b.player_id) { UI.toast('Set a batting lineup first', 'err'); return; }
     const info = S.cat.batting[code];
-    const bs = S.ls.state.bases;
+    const bs = isEdit ? preBasesFor(editEv) : S.ls.state.bases;
     const occupied = ['3','2','1'].filter((n) => bs[n]);
     const batterDest = code==='HR' ? 'H' : (info.bases>=1 && info.bases<=3 ? String(info.bases) : (info.bases===4?'H':'OUT'));
     // Force-advance chain for the runners already on base (feature 4).
@@ -764,13 +779,13 @@ const Scorer = (() => {
       <div class="field"><label>Fielder(s) / notation</label>${fielderPicker('rz-fld','')}</div>` : '';
     const runnerRows = occupied.map((n)=>`<div class="field"><label>Runner on ${n} &middot; ${UI.esc(nameOf(bs[n]))}</label>${destSelect('rz-run', Number(n), forced[n] || n)}</div>`).join('');
     UI.openModal(`
-      <div class="modal-head"><h2>${UI.esc(info.label)} &middot; ${UI.esc(b.full_name)}</h2>
+      <div class="modal-head"><h2>${isEdit?'Edit \u00b7 ':''}${UI.esc(info.label)} &middot; ${UI.esc(b.full_name)}</h2>
         <button class="icon-btn" data-x>&times;</button></div>
       <div class="modal-body">
         ${battedFields}
         <div class="field"><label>Batter advances to</label>${destSelect('rz-bat', 0, batterDest)}</div>
         ${runnerRows}
-        <label class="chk" style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="rz-err" ${(info.cat==='roe'||code==='CI')?'checked':''}> Error(s) charged on the play</label>
+        <label class="chk" style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="rz-err" ${((info.cat==='roe'||code==='CI')||(isEdit&&editEv.is_error))?'checked':''}> Error(s) charged on the play</label>
         <div class="field" id="rz-err-wrap" style="display:none"><label>Error(s) charged to fielder(s) &middot; select one or more</label>
           <select id="rz-err-on" multiple size="4" style="min-height:96px">${fldOpts('')}</select>
           <span class="muted" style="font-size:11px">Ctrl/Cmd-click to charge multiple fielders on the same play. Runners' extra bases from the error are set above in "advances to".</span></div>
@@ -778,7 +793,7 @@ const Scorer = (() => {
         <div class="rz-preview" id="rz-prev"></div>
       </div>
       <div class="modal-foot"><button class="btn ghost" data-cancel>Cancel</button>
-        <button class="btn primary" data-ok>Record Play</button></div>`);
+        <button class="btn primary" data-ok>${isEdit?'Save Play':'Record Play'}</button></div>`);
     const m = document.getElementById('modal');
     bindPickers(m);
     bindFielderPicker(m, 'rz-fld');
@@ -868,10 +883,12 @@ const Scorer = (() => {
         errorsJson = Array.from(errSel.selectedOptions).map((o)=>Number(o.value)).filter(Boolean);
         errorOn = errorsJson[0] || null;
       }
-      const pitchBuf = (S.pitchTracking && S.pitches.length) ? S.pitches.slice() : null;
+      const pitchBuf = (!isEdit && S.pitchTracking && S.pitches.length) ? S.pitches.slice() : null;
       const pitchNote = pitchBuf ? ` (${pitchBuf.length} pitch${pitchBuf.length>1?'es':''})` : '';
       const payload = {
-        inning: S.ls.state.inning, half: S.ls.state.half, kind: 'PA',
+        inning: isEdit ? editEv.inning : S.ls.state.inning,
+        half: isEdit ? editEv.half : S.ls.state.half,
+        kind: 'PA',
         batter_id: b.player_id, pitcher_id: S.pitcher, catcher_id: S.catcher,
         result: code,
         bb_type: info.batted ? (m.querySelector('#rz-bb')||{}).value || null : null,
@@ -889,10 +906,17 @@ const Scorer = (() => {
         description: `${b.full_name} \u2014 ${info.label}` + (r.runs?`, ${r.runs} run${r.runs>1?'s':''}`:'') + (r.err?', E':'') + pitchNote,
       };
       close();
-      S.pitches = [];
-      S.batOverride = null;
-      await API.post(`/games/${S.gameId}/events`, payload);
-      await reload(); render();
+      try {
+        if (isEdit) {
+          await API.patch(`/games/${S.gameId}/events/${editEv.id}`, payload);
+          await reload(); render(); UI.toast('Play updated');
+        } else {
+          S.pitches = [];
+          S.batOverride = null;
+          await API.post(`/games/${S.gameId}/events`, payload);
+          await reload(); render();
+        }
+      } catch (e) { UI.toast(e.message || 'Could not save play', 'err'); }
     };
   }
 
@@ -1034,10 +1058,11 @@ const Scorer = (() => {
   }
 
   // ------------------------------------------------- baserunning / battery
-  async function recordBR(code) {
+  async function recordBR(code, editEv) {
     const g = S.game;
-    if (['final','forfeited'].includes(g.status)) return;
-    const bs = S.ls.state.bases;
+    const isEdit = !!editEv;
+    if (['final','forfeited'].includes(g.status) && !isEdit) return;
+    const bs = isEdit ? preBasesFor(editEv) : S.ls.state.bases;
     const occupied = ['3','2','1'].filter((n) => bs[n]);
     if (!occupied.length && code !== 'BK') { UI.toast('No runners on base', 'err'); return; }
     const info = S.cat.baserunning[code];
@@ -1061,7 +1086,7 @@ const Scorer = (() => {
         <select id="rz-err-on" multiple size="4" style="min-height:96px">${fldOpts}</select>
         <span class="muted" style="font-size:11px">Ctrl/Cmd-click to charge multiple fielders. Set runners' extra bases above.</span></div>`;
     UI.openModal(`
-      <div class="modal-head"><h2>${UI.esc(info.label)}</h2><button class="icon-btn" data-x>&times;</button></div>
+      <div class="modal-head"><h2>${isEdit?'Edit \u00b7 ':''}${UI.esc(info.label)}</h2><button class="icon-btn" data-x>&times;</button></div>
       <div class="modal-body">${rows || '<p class="muted">Balk with no runners on base \u2014 will be logged with no base change.</p>'}
         ${notationField}
         ${errField}
@@ -1108,7 +1133,9 @@ const Scorer = (() => {
       const noteEl = m.querySelector('#rz-note');
       const detail = noteEl && noteEl.value.trim() ? noteEl.value.trim() : null;
       const payload = {
-        inning: S.ls.state.inning, half: S.ls.state.half, kind: 'BR',
+        inning: isEdit ? editEv.inning : S.ls.state.inning,
+        half: isEdit ? editEv.half : S.ls.state.half,
+        kind: 'BR',
         pitcher_id: S.pitcher, catcher_id: S.catcher, runner_id: r.runnerId,
         result: code, credited_to: credited, charged_to: charged,
         detail,
@@ -1119,8 +1146,15 @@ const Scorer = (() => {
           + (detail?` ${detail}`:'') + (isErr?', E':''),
       };
       close();
-      await API.post(`/games/${S.gameId}/events`, payload);
-      await reload(); render();
+      try {
+        if (isEdit) {
+          await API.patch(`/games/${S.gameId}/events/${editEv.id}`, payload);
+          await reload(); render(); UI.toast('Play updated');
+        } else {
+          await API.post(`/games/${S.gameId}/events`, payload);
+          await reload(); render();
+        }
+      } catch (e) { UI.toast(e.message || 'Could not save play', 'err'); }
     };
   }
 
