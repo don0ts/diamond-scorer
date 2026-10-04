@@ -1,0 +1,15 @@
+.git
+.gitignore
+.venv
+venv
+__pycache__
+*.pyc
+data/*.db
+data/*.db-*
+build
+dist
+*.spec
+exports
+requirements-desktop.txt
+build_windows_exe*.bat
+.DS_Store

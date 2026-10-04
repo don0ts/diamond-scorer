@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local SQLite database and backups (do NOT commit user data)
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/*.db-journal
+
+# Saved reports / session exports
+exports/
+*.zip
+
+# PyInstaller build artefacts
+build/
+dist/
+*.spec
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

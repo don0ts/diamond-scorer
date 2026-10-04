@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Diamond Scorer</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- Sidebar navigation -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">⚾</div>
+        <div class="brand-text">
+          <span class="brand-title">Diamond Scorer</span>
+          <span class="brand-sub">MLB-grade scoring</span>
+        </div>
+      </div>
+      <nav class="nav">
+        <button class="nav-item nav-cta" data-view="setup">
+          <span class="nav-ico">⚾</span> Initialize Game/Scoring</button>
+        <button class="nav-item active" data-view="games">
+          <span class="nav-ico">🏟️</span> Games</button>
+        <button class="nav-item" data-view="statistics">
+          <span class="nav-ico">📊</span> Statistics</button>
+        <button class="nav-item" data-view="utilities">
+          <span class="nav-ico">🛠️</span> Utilities</button>
+        <button class="nav-item" data-view="visualization">
+          <span class="nav-ico">🎯</span> Visualization</button>
+        <button class="nav-item" data-view="preferences">
+          <span class="nav-ico">⚙️</span> Preferences</button>
+      </nav>
+      <div class="sidebar-foot">
+        <span class="badge">v0.4 · Phase 4</span>
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="content">
+      <header class="topbar">
+        <h1 id="view-title">Games</h1>
+        <div class="topbar-actions" id="topbar-actions"></div>
+      </header>
+      <section id="view-root" class="view-root"></section>
+    </main>
+  </div>
+
+  <!-- Modal host -->
+  <div id="modal-host" class="modal-host hidden">
+    <div class="modal-backdrop"></div>
+    <div class="modal" id="modal"></div>
+  </div>
+
+  <!-- Toast host -->
+  <div id="toast-host" class="toast-host"></div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/ui.js"></script>
+  <script src="/js/prefs.js"></script>
+  <script src="/js/utilities.js"></script>
+  <script src="/js/report.js"></script>
+  <script src="/js/scorer.js"></script>
+  <script src="/js/setup.js"></script>
+  <script src="/js/games.js"></script>
+  <script src="/js/statistics.js"></script>
+  <script src="/js/visualization.js"></script>
+  <script src="/js/app.js"></script>
+</body>
+</html>

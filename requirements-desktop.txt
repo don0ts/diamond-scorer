@@ -1,0 +1,4 @@
+# Desktop (native window) build dependencies.
+# Installs everything from the base/web requirements, plus the native shell.
+-r requirements.txt
+pywebview==5.3.2

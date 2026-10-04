@@ -1,0 +1,22 @@
+# One-click-ish deploy on Render (https://render.com).
+# Push this repo to GitHub, then: New + > Blueprint, point it at the repo.
+services:
+  - type: web
+    name: diamond-scorer
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn backend.server:app -k uvicorn.workers.UvicornWorker -b 0.0.0.0:$PORT --workers 1 --timeout 120
+    healthCheckPath: /health
+    envVars:
+      # Persist the SQLite DB on a mounted disk (see disk block below).
+      - key: BASEBALL_DB
+        value: /var/data/baseball.db
+      # Protect the public URL with HTTP Basic auth. CHANGE THIS before deploy,
+      # or set it in the Render dashboard instead of committing a password.
+      - key: DIAMONDSCORER_AUTH
+        sync: false
+    disk:
+      name: diamond-scorer-data
+      mountPath: /var/data
+      sizeGB: 1
