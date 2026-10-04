@@ -4,4 +4,3 @@ uvicorn[standard]==0.42.0
 gunicorn==23.0.0
 pydantic==2.12.5
 reportlab==4.5.1
-python-multipart

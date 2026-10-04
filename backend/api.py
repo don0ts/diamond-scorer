@@ -45,7 +45,7 @@ class TeamIn(BaseModel):
 
 class PlayerIn(BaseModel):
     first_name: str
-    last_name: str
+    last_name: str = ""
     bats: str | None = None
     throws: str | None = None
     primary_position: str | None = None
@@ -352,6 +352,12 @@ def api_substitute(game_id: int, body: SubIn):
     return repo_games.substitute(game_id, body.model_dump())
 
 
+@router.get("/games/{game_id}/pitchers")
+def api_game_pitchers(game_id: int):
+    # Feature 12: everyone ever assigned the P position in this game.
+    return repo_games.game_pitchers(game_id)
+
+
 # ---- Events / live state ----
 @router.get("/games/{game_id}/state")
 def api_game_state(game_id: int):
@@ -371,6 +377,18 @@ def api_game_pitches(game_id: int):
 @router.post("/games/{game_id}/events")
 def api_add_event(game_id: int, body: dict):
     return repo_games.add_event(game_id, body)
+
+
+@router.patch("/games/{game_id}/events/{event_id}")
+def api_update_event(game_id: int, event_id: int, body: dict):
+    # Feature 3: in-place edit of a logged play.
+    return repo_games.update_event(game_id, event_id, body)
+
+
+@router.delete("/games/{game_id}/events/{event_id}")
+def api_delete_event(game_id: int, event_id: int):
+    # Feature 3: delete a logged play (SUB markers revert their lineup change).
+    return repo_games.delete_event(game_id, event_id)
 
 
 @router.post("/games/{game_id}/undo")

@@ -40,8 +40,8 @@ _local = threading.local()
 
 def set_db_path(path: str | os.PathLike) -> None:
     """Override the database file location (used by tests / import-load)."""
-    BASE_DIR = Path(__file__).resolve().parent.parent
-    _db_path = BASE_DIR / "data" / "mi_base.db" 
+    global _db_path
+    _db_path = Path(path)
     # Drop any cached connection on this thread so the new path takes effect.
     conn = getattr(_local, "conn", None)
     if conn is not None:

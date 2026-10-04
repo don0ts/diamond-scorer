@@ -30,6 +30,14 @@ const App = (() => {
 
   function init() {
     document.querySelectorAll('.nav-item').forEach((n) => n.onclick = () => show(n.dataset.view));
+    // Feature 11: hide / show the sidebar.
+    const app = document.getElementById('app');
+    const tog = document.getElementById('sidebar-toggle');
+    if (localStorage.getItem('ds_sidebar_hidden') === '1') app.classList.add('sidebar-hidden');
+    if (tog) tog.onclick = () => {
+      const hidden = app.classList.toggle('sidebar-hidden');
+      localStorage.setItem('ds_sidebar_hidden', hidden ? '1' : '0');
+    };
     show('utilities'); // start on the first working module
   }
 

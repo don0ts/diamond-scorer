@@ -39,7 +39,7 @@ const Utilities = (() => {
   function onAction(a) {
     if (a === 'new-league') editLeague();
     else if (a === 'new-team') editTeam();
-    else if (a === 'new-player') editPlayer();
+    else if (a === 'new-player') createPlayer();
     else if (a === 'export-session') exportSession();
     else if (a === 'import-session') importSession();
   }
@@ -295,14 +295,18 @@ const Utilities = (() => {
       body.querySelector('#e1').onclick = () => editTeam(); return;
     }
     body.innerHTML = `<div class="grid-cards">` + teams.map((t) => `
-      <div class="card">
+      <div class="card card-click" data-detail="${t.id}">
         <div class="card-row"><h3>${UI.esc(t.name)}</h3>
           <span class="pill" style="background:${UI.esc(t.color||'var(--blue-soft)')};color:#fff">${UI.esc(t.abbrev||'')}</span></div>
         <div class="muted">${UI.esc(t.city||'')}</div>
-        <div class="card-row" style="margin-top:12px"><span></span><span class="row-actions">
+        <div class="card-row" style="margin-top:12px"><span class="muted" style="font-size:11px">Click for details</span><span class="row-actions">
           <button class="btn sm ghost" data-edit="${t.id}">Edit</button>
           <button class="btn sm danger" data-del="${t.id}">Delete</button></span></div></div>`).join('') + `</div>`;
-    body.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => editTeam(teams.find((x)=>x.id==b.dataset.edit)));
+    body.querySelectorAll('[data-detail]').forEach((c) => c.onclick = (e) => {
+      if (e.target.dataset.edit || e.target.dataset.del) return;
+      showTeamDetail(teams.find((x)=>x.id==c.dataset.detail));
+    });
+    body.querySelectorAll('[data-edit]').forEach((b) => b.onclick = (e) => { e.stopPropagation(); editTeam(teams.find((x)=>x.id==b.dataset.edit)); });
     body.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
       const t = teams.find((x)=>x.id==b.dataset.del);
       if (await UI.confirm('Delete team', `Delete "${t.name}"?`, {danger:true, okLabel:'Delete'})) {
@@ -310,6 +314,48 @@ const Utilities = (() => {
       }
     });
   }
+  // Feature 6: team detail view — shows the team's attributes plus every
+  // season it participates in (with roster size).
+  async function showTeamDetail(t) {
+    if (!t) return;
+    UI.openModal(`<div class="modal-head"><h2>${UI.esc(t.name)} ${t.abbrev?`<span class="tag">${UI.esc(t.abbrev)}</span>`:''}</h2>
+      <button class="icon-btn" data-x>×</button></div>
+      <div class="modal-body">
+        <div class="detail-grid">
+          <div><span class="muted">City</span><div>${UI.esc(t.city||'—')}</div></div>
+          <div><span class="muted">Abbreviation</span><div>${UI.esc(t.abbrev||'—')}</div></div>
+        </div>
+        ${t.notes?`<p style="margin-top:10px">${UI.esc(t.notes)}</p>`:''}
+        <h3 style="margin-top:16px">Seasons</h3>
+        <div id="td-seasons"><p class="muted">Loading…</p></div>
+      </div>
+      <div class="modal-foot"><button class="btn primary" data-x>Close</button></div>`);
+    document.querySelectorAll('#modal [data-x]').forEach((b) => b.onclick = UI.closeModal);
+    // Scan leagues -> seasons to find where this team plays.
+    try {
+      const leagues = await API.leagues();
+      const seasonLists = await Promise.all(leagues.map((l) => API.seasons(l.id).catch(()=>[])));
+      const seasons = [];
+      leagues.forEach((l, i) => seasonLists[i].forEach((s) => seasons.push({ ...s, league_name: l.name })));
+      const checks = await Promise.all(seasons.map((s) => API.seasonTeams(s.id).catch(()=>[])));
+      const rows = [];
+      for (let i = 0; i < seasons.length; i++) {
+        if (!checks[i].some((x) => x.id === t.id)) continue;
+        const s = seasons[i];
+        const roster = await API.roster(s.id, t.id).catch(()=>[]);
+        rows.push(`<tr><td>${UI.esc(s.league_name)}</td><td>${UI.esc(s.name)}</td>
+          <td>${UI.esc(s.year||'')}</td><td>${roster.length}</td></tr>`);
+      }
+      const host = document.getElementById('td-seasons');
+      if (host) host.innerHTML = rows.length
+        ? `<table class="tbl"><thead><tr><th>League</th><th>Season</th><th>Year</th><th>Roster</th></tr></thead><tbody>${rows.join('')}</tbody></table>`
+        : '<p class="muted">Not assigned to any season yet.</p>';
+    } catch (e) {
+      const host = document.getElementById('td-seasons');
+      if (host) host.innerHTML = '<p class="muted">Could not load season participation.</p>';
+    }
+  }
+
   async function editTeam(t) {
     const vals = await UI.formModal(t ? 'Edit Team' : 'New Team', [
       {key:'name', label:'Team Name', required:true, placeholder:'e.g. River City Rangers'},
@@ -329,11 +375,11 @@ const Utilities = (() => {
     if (!players.length) {
       body.innerHTML = UI.empty('🧍', 'No players yet. Each player gets a permanent ID so history follows them across leagues and seasons.',
         `<div class="coming-soon"><button class="btn primary" id="e1">+ New Player</button></div>`);
-      body.querySelector('#e1').onclick = () => editPlayer(); return;
+      body.querySelector('#e1').onclick = () => createPlayer(); return;
     }
     body.innerHTML = `<div class="panel"><div class="panel-body">
       <table class="tbl"><thead><tr><th>ID</th><th>Name</th><th>Pos</th><th>Bats/Throws</th><th></th></tr></thead><tbody>` +
-      players.map((p) => `<tr><td><span class="tag mono">${UI.esc(p.public_id||('#'+p.id))}</span></td><td>${UI.esc(p.full_name)}</td>
+      players.map((p) => `<tr><td><span class="tag mono">${UI.esc(p.public_id||('#'+p.id))}</span></td><td><a class="link" data-detail="${p.id}">${UI.esc(p.full_name)}</a></td>
         <td>${p.primary_position?`<span class="tag">${UI.esc(p.primary_position)}</span>`:'<span class="muted">\u2014</span>'}</td>
         <td class="muted">${UI.esc(p.bats||'-')}/${UI.esc(p.throws||'-')}</td>
         <td class="row-actions">
@@ -341,6 +387,7 @@ const Utilities = (() => {
           <button class="btn sm ghost" data-edit="${p.id}">Edit</button>
           <button class="btn sm danger" data-del="${p.id}">Delete</button></td></tr>`).join('') +
       `</tbody></table></div></div>`;
+    body.querySelectorAll('[data-detail]').forEach((b) => b.onclick = () => showPlayerDetail(players.find((x)=>x.id==b.dataset.detail)));
     body.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => editPlayer(players.find((x)=>x.id==b.dataset.edit)));
     body.querySelectorAll('[data-hist]').forEach((b) => b.onclick = () => showHistory(players.find((x)=>x.id==b.dataset.hist)));
     body.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
@@ -350,10 +397,91 @@ const Utilities = (() => {
       }
     });
   }
+  // Feature 8: create a new player AND optionally assign them to a team in one
+  // step via cascading League -> Season -> Team dropdowns.
+  async function createPlayer() {
+    const posOpts = `<option value="">— none —</option>` +
+      POSITIONS.map((c)=>`<option value="${c}">${c} — ${POS_LABELS[c]}</option>`).join('');
+    const leagues = await API.leagues().catch(()=>[]);
+    const leagueOpts = `<option value="">— don't assign now —</option>` +
+      leagues.map((l)=>`<option value="${l.id}">${UI.esc(l.name)}</option>`).join('');
+    UI.openModal(`<div class="modal-head"><h2>New Player</h2>
+      <button class="icon-btn" data-x>×</button></div>
+      <div class="modal-body"><form id="np-form">
+        <div class="field"><label>Player Name <span style="color:var(--red)">*</span></label><input name="player_name" placeholder="e.g. Mike Trout" /></div>
+        <div class="field"><label>Primary Position</label><select name="primary_position">${posOpts}</select></div>
+        <div class="grid-2" style="grid-template-columns:1fr 1fr;gap:10px">
+          <div class="field"><label>Bats</label><select name="bats"><option value=""></option><option value="R">Right</option><option value="L">Left</option><option value="S">Switch</option></select></div>
+          <div class="field"><label>Throws</label><select name="throws"><option value=""></option><option value="R">Right</option><option value="L">Left</option></select></div>
+        </div>
+        <h3 style="margin:14px 0 6px">Assign to Team (optional)</h3>
+        <div class="field"><label>League</label><select id="np-league">${leagueOpts}</select></div>
+        <div class="field"><label>Season</label><select id="np-season" disabled><option value="">—</option></select></div>
+        <div class="field"><label>Team</label><select id="np-team" disabled><option value="">—</option></select></div>
+        <div class="field"><label>Jersey #</label><input name="jersey" /></div>
+      </form></div>
+      <div class="modal-foot"><button class="btn ghost" data-cancel>Cancel</button>
+        <button class="btn primary" data-ok>Create Player</button></div>`);
+    const m = document.getElementById('modal');
+    const lSel = m.querySelector('#np-league');
+    const sSel = m.querySelector('#np-season');
+    const tSel = m.querySelector('#np-team');
+    lSel.onchange = async () => {
+      sSel.innerHTML = '<option value="">—</option>'; tSel.innerHTML = '<option value="">—</option>';
+      sSel.disabled = true; tSel.disabled = true;
+      if (!lSel.value) return;
+      const seasons = await API.seasons(Number(lSel.value)).catch(()=>[]);
+      sSel.innerHTML = '<option value="">— select season —</option>' +
+        seasons.map((s)=>`<option value="${s.id}">${UI.esc(s.name)}${s.year?` (${s.year})`:''}</option>`).join('');
+      sSel.disabled = false;
+    };
+    sSel.onchange = async () => {
+      tSel.innerHTML = '<option value="">—</option>'; tSel.disabled = true;
+      if (!sSel.value) return;
+      const teams = await API.seasonTeams(Number(sSel.value)).catch(()=>[]);
+      tSel.innerHTML = '<option value="">— select team —</option>' +
+        teams.map((t)=>`<option value="${t.id}">${UI.esc(t.name)}</option>`).join('');
+      tSel.disabled = false;
+    };
+    m.querySelector('[data-x]').onclick = UI.closeModal;
+    m.querySelector('[data-cancel]').onclick = UI.closeModal;
+    m.querySelector('[data-ok]').onclick = async () => {
+      const f = m.querySelector('#np-form');
+      const nm = f.player_name.value.trim();
+      if (!nm) {
+        f.player_name.style.borderColor = 'var(--red)';
+        UI.toast('Player name is required', 'err'); return;
+      }
+      const nparts = nm.split(/\s+/);
+      const first = nparts.shift();
+      const last = nparts.join(' ');
+      const payload = {
+        first_name: first, last_name: last,
+        primary_position: f.primary_position.value || null,
+        bats: f.bats.value || null, throws: f.throws.value || null,
+      };
+      try {
+        const created = await API.post('/players', payload);
+        const sid = sSel.value, tid = tSel.value;
+        if (sid && tid) {
+          await API.post(`/seasons/${sid}/teams/${tid}/roster`, {
+            player_id: created.id,
+            jersey: f.jersey.value.trim() || null,
+            position: payload.primary_position || null,
+          });
+          UI.toast(`Player created (ID ${created.public_id||('#'+created.id)}) & assigned`);
+        } else {
+          UI.toast(`Player created (ID ${created.public_id||('#'+created.id)})`);
+        }
+        UI.closeModal(); render(root());
+      } catch (e) { UI.toast(e.message || 'Could not create player', 'err'); }
+    };
+  }
+
   async function editPlayer(p) {
+    const curName = p ? [p.first_name, p.last_name].filter(Boolean).join(' ') : '';
     const vals = await UI.formModal(p ? 'Edit Player' : 'New Player', [
-      {key:'first_name', label:'First Name', required:true},
-      {key:'last_name', label:'Last Name', required:true},
+      {key:'player_name', label:'Player Name', required:true, value:curName, placeholder:'e.g. Mike Trout'},
       {key:'primary_position', label:'Primary Position', type:'select',
         options:[{value:'',label:'\u2014 none \u2014'}].concat(
           POSITIONS.map((c)=>({value:c,label:`${c} \u2014 ${POS_LABELS[c]}`})))},
@@ -362,10 +490,38 @@ const Utilities = (() => {
       {key:'birthdate', label:'Birthdate', type:'date'},
       {key:'notes', label:'Notes', type:'textarea'}], p || {});
     if (!vals) return;
+    const _np = String(vals.player_name || '').trim().split(/\s+/);
+    vals.first_name = _np.shift() || '';
+    vals.last_name = _np.join(' ');
+    delete vals.player_name;
     if (p) { await API.put(`/players/${p.id}`, vals); UI.toast('Player updated'); }
     else { const c = await API.post('/players', vals); UI.toast(`Player created (ID ${c.public_id||('#'+c.id)})`); }
     render(root());
   }
+  // Feature 6: full player detail view (attributes + roster history).
+  async function showPlayerDetail(p) {
+    if (!p) return;
+    const hist = await API.playerHistory(p.id).catch(()=>[]);
+    const rows = hist.length ? `<table class="tbl"><thead><tr><th>League</th><th>Season</th><th>Team</th><th>#</th><th>Pos</th></tr></thead><tbody>` +
+      hist.map((h) => `<tr><td>${UI.esc(h.league_name)}</td><td>${UI.esc(h.season_name)}</td>
+        <td>${UI.esc(h.team_name)}</td><td>${UI.esc(h.jersey||'')}</td><td>${UI.esc(h.position||'')}</td></tr>`).join('') +
+      `</tbody></table>` : '<p class="muted">No roster history yet.</p>';
+    UI.openModal(`<div class="modal-head"><h2>${UI.esc(p.full_name)} <span class="tag mono">${UI.esc(p.public_id||('#'+p.id))}</span></h2>
+      <button class="icon-btn" data-x>×</button></div>
+      <div class="modal-body">
+        <div class="detail-grid">
+          <div><span class="muted">Primary position</span><div>${UI.esc(p.primary_position||'—')}</div></div>
+          <div><span class="muted">Bats / Throws</span><div>${UI.esc(p.bats||'-')} / ${UI.esc(p.throws||'-')}</div></div>
+          <div><span class="muted">Birthdate</span><div>${UI.esc(p.birthdate||'—')}</div></div>
+        </div>
+        ${p.notes?`<p style="margin-top:10px">${UI.esc(p.notes)}</p>`:''}
+        <h3 style="margin-top:16px">Roster History</h3>
+        ${rows}
+      </div>
+      <div class="modal-foot"><button class="btn primary" data-x>Close</button></div>`);
+    document.querySelectorAll('#modal [data-x]').forEach((b) => b.onclick = UI.closeModal);
+  }
+
   async function showHistory(p) {
     const hist = await API.playerHistory(p.id);
     const rows = hist.length ? `<table class="tbl"><thead><tr><th>League</th><th>Season</th><th>Team</th><th>#</th><th>Pos</th></tr></thead><tbody>` +

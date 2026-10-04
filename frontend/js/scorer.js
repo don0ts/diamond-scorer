@@ -43,6 +43,7 @@ const Scorer = (() => {
     S.lineups = await API.get(`/games/${S.gameId}/lineups`);
     S.ls = await API.get(`/games/${S.gameId}/state`);
     S.events = await API.get(`/games/${S.gameId}/events`);
+    S.pitchers = await API.get(`/games/${S.gameId}/pitchers`).catch(()=>[]);
     if (!S.cat) S.cat = await API.get('/games/catalogue');
   }
 
@@ -53,22 +54,40 @@ const Scorer = (() => {
     return (S.lineups.away || []).length >= 1 && (S.lineups.home || []).length >= 1;
   }
 
+  function battingOrderList(side) {
+    // Only real batting slots (batting_order > 0). Pitcher-only slots use
+    // batting_order 0 and never come to bat (feature 5). Lineups endpoint
+    // already returns active rows only.
+    return (S.lineups[side] || [])
+      .filter((x) => Number(x.batting_order) > 0)
+      .slice()
+      .sort((a, b) => a.batting_order - b.batting_order);
+  }
+
   function currentBatter() {
     const side = battingSide();
-    const lu = S.lineups[side] || [];
-    if (!lu.length) return null;
+    const order = battingOrderList(side);
+    if (!order.length) return null;
     // Bat out of order: an explicit override wins until it is consumed/cleared.
     if (S.batOverride) {
-      const ov = lu.find((x) => String(x.player_id) === String(S.batOverride));
+      const ov = order.find((x) => String(x.player_id) === String(S.batOverride));
       if (ov) return ov;
       S.batOverride = null;
     }
-    const paCount = S.events.filter((e) => e.kind === 'PA' && e.half === S.ls.state.half).length;
-    // NB: half only distinguishes T/B; across innings the order continues.
-    const paThisSide = S.events.filter((e) => e.kind === 'PA' &&
-      ((side === 'away' && e.half === 'T') || (side === 'home' && e.half === 'B'))).length;
-    const order = lu.slice().sort((a, b) => a.batting_order - b.batting_order);
-    return order[paThisSide % order.length];
+    const half = side === 'away' ? 'T' : 'B';
+    const pas = S.events.filter((e) => e.kind === 'PA' && e.half === half);
+    // Feature 10: the lineup continues from whoever batted last, so an
+    // out-of-order batter permanently shifts the order. Derive the next slot
+    // from the last recorded PA rather than a blind modulo count.
+    if (!pas.length) return order[0];
+    const lastBatterId = pas[pas.length - 1].batter_id;
+    let idx = order.findIndex((x) => String(x.player_id) === String(lastBatterId));
+    if (idx < 0) {
+      // Last batter was substituted out: fall back to the plain PA count so the
+      // order still advances sensibly.
+      return order[pas.length % order.length];
+    }
+    return order[(idx + 1) % order.length];
   }
 
   function defaultBattery() {
@@ -130,7 +149,7 @@ const Scorer = (() => {
   function lineScoreHtml() {
     const ls = S.ls; const g = S.game;
     const th = ls.innings.map((i) => `<th>${i}</th>`).join('');
-    const cells = (arr) => arr.map((v) => `<td>${v || 0}</td>`).join('');
+    const cells = (arr) => arr.map((v) => `<td>${v == null ? '' : v}</td>`).join('');
     const row = (name, arr, t) => `<tr><td class="sc-ls-team">${UI.esc(name)}</td>${cells(arr)}
       <td class="sc-ls-tot">${t.R}</td><td>${t.H}</td><td>${t.E}</td></tr>`;
     return `<div class="panel" style="margin:14px 0"><div class="panel-body" style="overflow:auto">
@@ -199,9 +218,14 @@ const Scorer = (() => {
     ]);
     S._pool = { away: rosterPool(awayR), home: rosterPool(homeR) };
     S._draft = S._draft || { away: draftFrom(S.lineups.away), home: draftFrom(S.lineups.home) };
-    host.innerHTML = `<div class="grid-2" style="grid-template-columns:1fr 1fr">
+    host.innerHTML = `<div style="margin-bottom:12px">
+        <label class="lu-posnum"><input type="checkbox" id="lu-posnum" ${S.posAsNumbers?'checked':''} /> Show positions as numbers (P=1 … RF=9)</label>
+      </div>
+      <div class="grid-2" style="grid-template-columns:1fr 1fr">
       ${sideEditor('away', S.game.away_name)}${sideEditor('home', S.game.home_name)}</div>
       <div style="margin-top:16px;text-align:right"><button class="btn primary" id="lu-save">Save Lineups</button></div>`;
+    const pn = document.getElementById('lu-posnum');
+    if (pn) pn.onchange = () => { S.posAsNumbers = pn.checked; renderLineupEditor(); };
     ['away','home'].forEach(bindSideEditor);
     document.getElementById('lu-save').onclick = saveLineups;
   }
@@ -214,23 +238,45 @@ const Scorer = (() => {
       .sort((a, b) => a.full_name.localeCompare(b.full_name));
   }
   function draftFrom(lu) {
-    const arr = (lu||[]).slice().sort((a,b)=>a.batting_order-b.batting_order)
+    const sorted = (lu||[]).slice().sort((a,b)=>a.batting_order-b.batting_order);
+    const batters = sorted.filter((x)=>Number(x.batting_order)>0)
       .map((x)=>({player_id:x.player_id, position:x.position}));
-    while (arr.length < 9) arr.push({player_id:'', position:''});
-    return arr;
+    const pitchers = sorted.filter((x)=>Number(x.batting_order)===0)
+      .map((x)=>({player_id:x.player_id, position:x.position||'P', pitcherOnly:true}));
+    while (batters.length < 9) batters.push({player_id:'', position:''});
+    return batters.concat(pitchers);
+  }
+  // Feature 7: optionally show defensive positions as scoring numbers 1..9
+  // (P=1 .. RF=9); DH (and any other non-numbered code) is left as-is.
+  const POS_TO_NUM = {P:'1',C:'2','1B':'3','2B':'4','3B':'5',SS:'6',LF:'7',CF:'8',RF:'9'};
+  function posLabel(code) {
+    if (!code) return '';
+    return (S.posAsNumbers && POS_TO_NUM[code]) ? POS_TO_NUM[code] : code;
   }
   function sideEditor(side, name) {
     const pool = S._pool[side]; const draft = S._draft[side];
     const opts = (sel) => pool.map((p)=>`<option value="${p.player_id}" ${p.player_id==sel?'selected':''}>${UI.esc(p.full_name)}</option>`).join('');
-    const posOpts = (sel) => POS.map((p)=>`<option ${p==sel?'selected':''}>${p}</option>`).join('');
-    const rows = draft.map((d,i)=>`<tr><td>${i+1}</td>
-      <td><select data-side="${side}" data-i="${i}" data-f="player_id" style="width:100%"><option value=""></option>${opts(d.player_id)}</select></td>
-      <td><select data-side="${side}" data-i="${i}" data-f="position"><option value=""></option>${posOpts(d.position)}</select></td></tr>`).join('');
+    const posOpts = (sel) => POS.map((p)=>`<option value="${p}" ${p==sel?'selected':''}>${posLabel(p)}</option>`).join('');
+    let batNum = 0;
+    const rows = draft.map((d,i)=>{
+      if (d.pitcherOnly) {
+        return `<tr class="lu-pitcher-row"><td title="Pitcher only — does not bat">P</td>
+          <td><select data-side="${side}" data-i="${i}" data-f="player_id" style="width:100%"><option value=""></option>${opts(d.player_id)}</select></td>
+          <td><select data-side="${side}" data-i="${i}" data-f="position"><option value=""></option>${posOpts(d.position)}</select></td>
+          <td><button class="btn ghost sm" data-del-slot="${side}:${i}" title="Remove pitcher slot">×</button></td></tr>`;
+      }
+      batNum += 1;
+      return `<tr><td>${batNum}</td>
+        <td><select data-side="${side}" data-i="${i}" data-f="player_id" style="width:100%"><option value=""></option>${opts(d.player_id)}</select></td>
+        <td><select data-side="${side}" data-i="${i}" data-f="position"><option value=""></option>${posOpts(d.position)}</select></td>
+        <td></td></tr>`;
+    }).join('');
     return `<div><div class="section-title">${UI.esc(name)}</div>
-      <table class="tbl"><thead><tr><th>#</th><th>Batter</th><th>Pos</th></tr></thead><tbody>${rows}</tbody></table>
-      <div style="margin-top:8px;display:flex;gap:8px">
+      <table class="tbl"><thead><tr><th>#</th><th>Batter</th><th>Pos</th><th></th></tr></thead><tbody>${rows}</tbody></table>
+      <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn ghost sm" data-add="${side}">+ Add slot</button>
-        <button class="btn ghost sm" data-remove-slot="${side}" ${draft.length<=1?'disabled':''}>− Remove slot</button>
+        <button class="btn ghost sm" data-remove-slot="${side}">− Remove slot</button>
+        <button class="btn ghost sm" data-add-pitcher="${side}" style="border-color:#63263a;color:var(--red)">+ Add Pitcher</button>
       </div></div>`;
   }
   function bindSideEditor(side) {
@@ -238,13 +284,35 @@ const Scorer = (() => {
       S._draft[side][+sel.dataset.i][sel.dataset.f] = sel.value;
     });
     const add = document.querySelector(`[data-add="${side}"]`);
-    if (add) add.onclick = () => { S._draft[side].push({player_id:'',position:''}); renderLineupEditor(); };
-    const rm = document.querySelector(`[data-remove-slot="${side}"]`);
-    if (rm) rm.onclick = () => {
-      if (S._draft[side].length <= 1) return;
-      S._draft[side].pop(); // drop the last batting slot
+    if (add) add.onclick = () => {
+      // Insert a batting slot before any trailing pitcher-only slots.
+      const d = S._draft[side];
+      const firstP = d.findIndex((x)=>x.pitcherOnly);
+      const at = firstP < 0 ? d.length : firstP;
+      d.splice(at, 0, {player_id:'', position:''});
       renderLineupEditor();
     };
+    const rm = document.querySelector(`[data-remove-slot="${side}"]`);
+    if (rm) rm.onclick = () => {
+      const d = S._draft[side];
+      // Drop the last batting (non-pitcher) slot.
+      for (let i = d.length - 1; i >= 0; i--) {
+        if (!d[i].pitcherOnly) {
+          if (d.filter((x)=>!x.pitcherOnly).length <= 1) return;
+          d.splice(i, 1); break;
+        }
+      }
+      renderLineupEditor();
+    };
+    const addP = document.querySelector(`[data-add-pitcher="${side}"]`);
+    if (addP) addP.onclick = () => {
+      S._draft[side].push({player_id:'', position:'P', pitcherOnly:true});
+      renderLineupEditor();
+    };
+    document.querySelectorAll(`[data-del-slot^="${side}:"]`).forEach((b)=> b.onclick = () => {
+      const idx = Number(b.dataset.delSlot.split(':')[1]);
+      S._draft[side].splice(idx, 1); renderLineupEditor();
+    });
   }
   async function saveLineups() {
     const MANDATORY = ['P','C','1B','2B','3B','SS','LF','CF','RF'];
@@ -267,8 +335,14 @@ const Scorer = (() => {
       if (!ok) return;
     }
     for (const side of ['away','home']) {
+      let order = 0;
       const entries = S._draft[side].filter((d)=>d.player_id)
-        .map((d,idx)=>({batting_order: idx+1, player_id:Number(d.player_id), position:d.position||null}));
+        .map((d)=>({
+          // Pitcher-only slots never bat: batting_order 0 (feature 5).
+          batting_order: d.pitcherOnly ? 0 : (order += 1),
+          player_id: Number(d.player_id),
+          position: d.position||null,
+        }));
       if (entries.length) await API.post(`/games/${S.gameId}/lineups`, { side, entries });
     }
     S._draft = null; S.forceLineup = false; UI.toast('Lineups saved');
@@ -421,8 +495,13 @@ const Scorer = (() => {
     if (!S.events.length) return UI.empty('\u26be', 'No plays yet. Record the first batter\u2019s result.');
     return S.events.slice().reverse().map((e) => {
       const tag = e.half==='T'?'\u25b2':'\u25bc';
-      return `<div class="logrow"><span class="logi">${tag}${e.inning}</span>
-        <span class="logd">${UI.esc(e.description||describe(e))}</span></div>`;
+      return `<div class="logrow ${e.kind==='SUB'?'logrow-sub':''}">
+        <span class="logi">${tag}${e.inning}</span>
+        <span class="logd">${e.kind==='SUB'?'🔁 ':''}${UI.esc(e.description||describe(e))}</span>
+        <span class="logacts">
+          ${e.kind==='SUB'?'':`<button class="btn ghost xs" data-edit-ev="${e.id}" title="Edit">✎</button>`}
+          <button class="btn ghost xs" data-del-ev="${e.id}" title="Delete">×</button>
+        </span></div>`;
     }).join('');
   }
 
@@ -450,6 +529,47 @@ const Scorer = (() => {
     if ($('pz-clear')) $('pz-clear').onclick = () => { S.pitches = []; render(); };
     document.querySelectorAll('[data-res]').forEach((bx) => bx.onclick = () => recordPA(bx.dataset.res));
     document.querySelectorAll('[data-br]').forEach((bx) => bx.onclick = () => recordBR(bx.dataset.br));
+    document.querySelectorAll('[data-del-ev]').forEach((bx) => bx.onclick = () => deleteEvent(Number(bx.dataset.delEv)));
+    document.querySelectorAll('[data-edit-ev]').forEach((bx) => bx.onclick = () => editEvent(Number(bx.dataset.editEv)));
+  }
+
+  async function deleteEvent(eid) {
+    const ev = S.events.find((e) => e.id === eid);
+    const msg = ev && ev.kind === 'SUB'
+      ? 'Delete this substitution? The lineup change it made will be reverted.'
+      : 'Delete this play from the log? Base running on this play is not auto-restored — re-record if needed.';
+    if (!(await UI.confirm('Delete play', msg))) return;
+    try {
+      await API.del(`/games/${S.gameId}/events/${eid}`);
+      await reload(); render(); UI.toast('Play deleted');
+    } catch (e) { UI.toast(e.message || 'Could not delete', 'err'); }
+  }
+
+  async function editEvent(eid) {
+    const ev = S.events.find((e) => e.id === eid);
+    if (!ev) return;
+    const kind = ev.kind || 'PA';
+    const cat = kind === 'BR' ? S.cat.baserunning : S.cat.batting;
+    const resOpts = Object.keys(cat).map((k) => ({ value:k, label:`${k} — ${cat[k].label||k}` }));
+    const v = await UI.formModal('Edit Play', [
+      { key:'result', label:'Result', type:'select', value:ev.result, options:resOpts },
+      { key:'rbi', label:'RBI', type:'number', value:ev.rbi||0 },
+      { key:'outs_recorded', label:'Outs recorded', type:'number', value:ev.outs_recorded||0 },
+      { key:'runs_scored', label:'Runs scored', type:'number', value:ev.runs_scored||0 },
+      { key:'description', label:'Description (optional)', value:ev.description||'' },
+    ]);
+    if (!v) return;
+    const body = {
+      result: v.result || ev.result,
+      rbi: Number(v.rbi)||0,
+      outs_recorded: Number(v.outs_recorded)||0,
+      runs_scored: Number(v.runs_scored)||0,
+      description: (v.description||'').trim() || null,
+    };
+    try {
+      await API.patch(`/games/${S.gameId}/events/${eid}`, body);
+      await reload(); render(); UI.toast('Play updated');
+    } catch (e) { UI.toast(e.message || 'Could not update', 'err'); }
   }
 
   async function undo() {
@@ -582,6 +702,28 @@ const Scorer = (() => {
     refresh();
   }
 
+  // Feature 4: when the batter is placed on a base, any runner whose base
+  // becomes double-occupied is force-advanced along the chain to the first
+  // free base (home if pushed past 3rd). Returns {baseNum: destString} for
+  // every currently-occupied runner base; unforced runners default to a hold.
+  function forcedDest(batterBaseNum, bs) {
+    const occ = new Set();
+    if (batterBaseNum >= 1 && batterBaseNum <= 3) occ.add(batterBaseNum);
+    const dest = {};
+    for (let r = 1; r <= 3; r++) {
+      if (!bs[r]) continue;
+      if (occ.has(r)) {
+        let t = r + 1;
+        while (t <= 3 && occ.has(t)) t++;
+        if (t > 3) { dest[r] = 'H'; } else { dest[r] = String(t); occ.add(t); }
+      } else {
+        dest[r] = String(r); // not forced -> hold
+        occ.add(r);
+      }
+    }
+    return dest;
+  }
+
   function destSelect(cls, from, sel) {
     let opts;
     if (from === 0) opts = [['OUT','Out'],['1','1B'],['2','2B'],['3','3B'],['H','Home']];
@@ -601,6 +743,9 @@ const Scorer = (() => {
     const bs = S.ls.state.bases;
     const occupied = ['3','2','1'].filter((n) => bs[n]);
     const batterDest = code==='HR' ? 'H' : (info.bases>=1 && info.bases<=3 ? String(info.bases) : (info.bases===4?'H':'OUT'));
+    // Force-advance chain for the runners already on base (feature 4).
+    const bNum = batterDest==='H' ? 4 : (batterDest==='OUT' ? 0 : Number(batterDest));
+    const forced = forcedDest(bNum, bs);
     const fielders = S.lineups[fieldingSide()] || [];
     const fldOpts = (sel) => fielders.map((x)=>`<option value="${x.player_id}" ${x.player_id==sel?'selected':''}>${UI.esc(x.full_name)}${x.position?` (${x.position})`:''}</option>`).join('');
     // Auto-fill batted-ball type from the out kind: GO->GB, FO->FB, LO->LD, POP->PU.
@@ -617,7 +762,7 @@ const Scorer = (() => {
         <div class="field"><label>Contact quality</label>${pickerField('rz-ct', CONTACT, '')}</div>
       </div>
       <div class="field"><label>Fielder(s) / notation</label>${fielderPicker('rz-fld','')}</div>` : '';
-    const runnerRows = occupied.map((n)=>`<div class="field"><label>Runner on ${n} &middot; ${UI.esc(nameOf(bs[n]))}</label>${destSelect('rz-run', Number(n), n)}</div>`).join('');
+    const runnerRows = occupied.map((n)=>`<div class="field"><label>Runner on ${n} &middot; ${UI.esc(nameOf(bs[n]))}</label>${destSelect('rz-run', Number(n), forced[n] || n)}</div>`).join('');
     UI.openModal(`
       <div class="modal-head"><h2>${UI.esc(info.label)} &middot; ${UI.esc(b.full_name)}</h2>
         <button class="icon-btn" data-x>&times;</button></div>
@@ -1008,9 +1153,19 @@ const Scorer = (() => {
 
   // --------------------------------------------------------- end game / wrap
   function pitcherOptions() {
-    const list = [];
-    ['away','home'].forEach((s)=> (S.lineups[s]||[]).forEach((x)=> list.push({ value:x.player_id, label:`${x.full_name} (${s==='away'?S.game.away_abbrev||'A':S.game.home_abbrev||'H'})` })));
-    return list;
+    // Feature 12: only players ever assigned the P position in this game.
+    const abbr = (s) => s === 'away' ? (S.game.away_abbrev||'A') : (S.game.home_abbrev||'H');
+    const list = (S.pitchers || []).map((p) => ({
+      value: p.player_id,
+      label: `${p.full_name} (${abbr(p.side)})`,
+    }));
+    if (list.length) return list;
+    // Fallback (should not happen): anyone currently playing P.
+    const out = [];
+    ['away','home'].forEach((s)=> (S.lineups[s]||[]).forEach((x)=> {
+      if (x.position === 'P') out.push({ value:x.player_id, label:`${x.full_name} (${abbr(s)})` });
+    }));
+    return out;
   }
   async function endGame() {
     const st = S.ls.state;

@@ -355,7 +355,7 @@ def _names(pids: Iterable[int]) -> dict[int, str]:
     c = get_conn()
     q = ",".join("?" * len(pids))
     rows = _r(c.execute(
-        f"SELECT id, (first_name||' '||last_name) AS name FROM players WHERE id IN ({q})",
+        f"SELECT id, (TRIM(first_name||' '||last_name)) AS name FROM players WHERE id IN ({q})",
         pids))
     return {r["id"]: r["name"] for r in rows}
 

@@ -1,10 +1,15 @@
 # One-click-ish deploy on Render (https://render.com).
 # Push this repo to GitHub, then: New + > Blueprint, point it at the repo.
+#
+# NOTE: this uses the paid "starter" plan because Diamond Scorer stores its
+# data in a SQLite file that needs a persistent disk, and Render does NOT allow
+# disks on the free tier. If you want to stay on the free tier, see the
+# commented "FREE TIER" block at the bottom (data is NOT persisted there).
 services:
   - type: web
     name: diamond-scorer
     runtime: python
-    plan: free
+    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn backend.server:app -k uvicorn.workers.UvicornWorker -b 0.0.0.0:$PORT --workers 1 --timeout 120
     healthCheckPath: /health
@@ -16,3 +21,26 @@ services:
       # or set it in the Render dashboard instead of committing a password.
       - key: DIAMONDSCORER_AUTH
         sync: false
+    disk:
+      name: diamond-scorer-data
+      mountPath: /var/data
+      sizeGB: 1
+
+# ---------------------------------------------------------------------------
+# FREE TIER variant (no persistent disk -> data resets on every deploy/restart,
+# and on wake-from-sleep). Use the in-app "Export Session" button to back up.
+# To use it: delete the service block above and uncomment the one below.
+# ---------------------------------------------------------------------------
+# services:
+#   - type: web
+#     name: diamond-scorer
+#     runtime: python
+#     plan: free
+#     buildCommand: pip install -r requirements.txt
+#     startCommand: gunicorn backend.server:app -k uvicorn.workers.UvicornWorker -b 0.0.0.0:$PORT --workers 1 --timeout 120
+#     healthCheckPath: /health
+#     envVars:
+#       # On free tier the filesystem is ephemeral; the DB still works for the
+#       # life of the instance but is wiped on redeploy/restart.
+#       - key: DIAMONDSCORER_AUTH
+#         sync: false

@@ -114,6 +114,9 @@ def compute_state(game_id: int) -> dict[str, Any]:
     hits = {"away": 0, "home": 0}
     errors = {"away": 0, "home": 0}
     line: dict[int, dict[str, int]] = {}
+    # Phase 10 (feature 9): track which half-innings have actually had a play
+    # recorded so the line score can stay blank until the first play lands.
+    played: dict[int, dict[str, bool]] = {}
 
     def batting_side(h: str) -> str:
         return "away" if h == "T" else "home"
@@ -125,6 +128,11 @@ def compute_state(game_id: int) -> dict[str, Any]:
         inning, half = e["inning"], e["half"]
         bside = batting_side(half)
         line.setdefault(inning, {"T": 0, "B": 0})
+        played.setdefault(inning, {"T": False, "B": False})
+        # Any scoring action (PA/BR) marks this half-inning as having begun;
+        # SUB markers alone do not "start" an inning on the line score.
+        if e["kind"] in ("PA", "BR"):
+            played[inning][half] = True
         if e["runs_scored"]:
             score[bside] += e["runs_scored"]
             line[inning][half] += e["runs_scored"]
@@ -160,7 +168,7 @@ def compute_state(game_id: int) -> dict[str, Any]:
     return {
         "inning": inning, "half": half, "outs": outs,
         "bases": bases, "score": score, "hits": hits, "errors": errors,
-        "line": line, "regulation_innings": reg,
+        "line": line, "played": played, "regulation_innings": reg,
         "status": game["status"], "event_count": len(events),
     }
 

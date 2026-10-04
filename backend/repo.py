@@ -166,14 +166,14 @@ def delete_team(team_id: int) -> None:
 def list_players() -> list[dict]:
     c = get_conn()
     return _rows(c.execute(
-        "SELECT p.*, (p.first_name || ' ' || p.last_name) AS full_name "
+        "SELECT p.*, (TRIM(p.first_name || ' ' || p.last_name)) AS full_name "
         "FROM players p ORDER BY p.last_name, p.first_name"))
 
 
 def get_player(player_id: int) -> dict | None:
     c = get_conn()
     return _one(c.execute(
-        "SELECT p.*, (p.first_name || ' ' || p.last_name) AS full_name "
+        "SELECT p.*, (TRIM(p.first_name || ' ' || p.last_name)) AS full_name "
         "FROM players p WHERE id = ?", (player_id,)))
 
 
@@ -251,7 +251,7 @@ def list_roster(season_id: int, team_id: int) -> list[dict]:
     c = get_conn()
     return _rows(c.execute(
         "SELECT r.id AS roster_id, r.jersey, r.position, p.* , "
-        "(p.first_name || ' ' || p.last_name) AS full_name "
+        "(TRIM(p.first_name || ' ' || p.last_name)) AS full_name "
         "FROM roster r JOIN players p ON p.id = r.player_id "
         "WHERE r.season_id = ? AND r.team_id = ? "
         "ORDER BY p.last_name, p.first_name", (season_id, team_id)))
@@ -266,7 +266,7 @@ def season_player_assignments(season_id: int) -> list[dict]:
     c = get_conn()
     return _rows(c.execute(
         "SELECT r.player_id, r.team_id, t.name AS team_name, "
-        "(p.first_name || ' ' || p.last_name) AS full_name "
+        "(TRIM(p.first_name || ' ' || p.last_name)) AS full_name "
         "FROM roster r JOIN teams t ON t.id = r.team_id "
         "JOIN players p ON p.id = r.player_id "
         "WHERE r.season_id = ?", (season_id,)))

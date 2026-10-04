@@ -117,7 +117,7 @@ def delete_game(game_id: int) -> None:
 def get_lineups(game_id: int) -> dict[str, list[dict]]:
     c = get_conn()
     rows = _rows(c.execute(
-        "SELECT l.*, (p.first_name||' '||p.last_name) AS full_name "
+        "SELECT l.*, (TRIM(p.first_name||' '||p.last_name)) AS full_name "
         "FROM game_lineups l JOIN players p ON p.id=l.player_id "
         "WHERE l.game_id=? AND l.active=1 ORDER BY l.side, l.batting_order, l.entered_seq",
         (game_id,)))
@@ -141,19 +141,63 @@ def set_lineup(game_id: int, side: str, entries: list[dict]) -> dict:
 
 
 def substitute(game_id: int, data: dict) -> dict:
-    """Replace a lineup slot with a new player (pinch hit / defensive sub)."""
+    """Replace a lineup slot with a new player (pinch hit / defensive sub).
+
+    Phase 10 (feature 2): every substitution / position change is also written
+    to the ordered event log as a ``kind='SUB'`` marker so it shows up in the
+    play-by-play and can be edited or deleted there. The marker never changes
+    runs/outs/bases; it stashes the affected lineup-row ids in ``detail`` (as
+    JSON) so deleting the marker can cleanly revert the lineup change.
+    """
     c = get_conn()
     old = _one(c.execute("SELECT * FROM game_lineups WHERE id=?", (data["lineup_id"],)))
+    if not old:
+        return get_lineups(game_id)
     seq = _next_seq(game_id)
-    if old:
-        c.execute("UPDATE game_lineups SET active=0 WHERE id=?", (old["id"],))
-        c.execute(
-            "INSERT INTO game_lineups (game_id, side, batting_order, player_id, position, "
-            "is_starter, entered_seq, sub_for) VALUES (?,?,?,?,?,0,?,?)",
-            (game_id, old["side"], old["batting_order"], data["player_id"],
-             data.get("position") or old["position"], seq, old["id"]))
+    new_pos = data.get("position") or old["position"]
+    c.execute("UPDATE game_lineups SET active=0 WHERE id=?", (old["id"],))
+    cur = c.execute(
+        "INSERT INTO game_lineups (game_id, side, batting_order, player_id, position, "
+        "is_starter, entered_seq, sub_for) VALUES (?,?,?,?,?,0,?,?)",
+        (game_id, old["side"], old["batting_order"], data["player_id"],
+         new_pos, seq, old["id"]))
+    new_id = cur.lastrowid
+
+    def _pname(pid):
+        r = c.execute(
+            "SELECT (TRIM(first_name||' '||last_name)) AS n FROM players WHERE id=?",
+            (pid,)).fetchone()
+        return r["n"] if r else f"#{pid}"
+    in_name = _pname(data["player_id"])
+    out_name = _pname(old["player_id"])
+    if int(data["player_id"]) == int(old["player_id"]):
+        desc = f"{in_name} \u2192 position {new_pos or '?'}"
+    else:
+        desc = f"{in_name} subs in for {out_name}" + (f" ({new_pos})" if new_pos else "")
+    st = compute_state(game_id)
+    meta = {"new_lineup_id": new_id, "old_lineup_id": old["id"],
+            "side": old["side"], "batting_order": old["batting_order"],
+            "position": new_pos}
+    c.execute(
+        "INSERT INTO game_events (game_id, seq, inning, half, kind, batter_id, "
+        "runner_id, result, detail, description) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (game_id, seq, st["inning"], st["half"], "SUB", data["player_id"],
+         old["player_id"], "SUB", json.dumps(meta), desc))
     c.commit()
     return get_lineups(game_id)
+
+
+def game_pitchers(game_id: int) -> list[dict]:
+    """Every player who has EVER been assigned the P position in this game
+    (feature 12), active or already substituted out. Used to restrict the
+    end-of-game W/L/Save pitcher dropdowns."""
+    c = get_conn()
+    return _rows(c.execute(
+        "SELECT DISTINCT l.player_id, l.side, "
+        "(TRIM(p.first_name||' '||p.last_name)) AS full_name "
+        "FROM game_lineups l JOIN players p ON p.id=l.player_id "
+        "WHERE l.game_id=? AND l.position='P' "
+        "ORDER BY l.side, full_name", (game_id,)))
 
 
 # ---------------------------------------------------------------------------
@@ -169,8 +213,8 @@ def _next_seq(game_id: int) -> int:
 def list_events(game_id: int) -> list[dict]:
     c = get_conn()
     return _rows(c.execute(
-        "SELECT e.*, (bp.first_name||' '||bp.last_name) AS batter_name, "
-        "(rp.first_name||' '||rp.last_name) AS runner_name "
+        "SELECT e.*, (TRIM(bp.first_name||' '||bp.last_name)) AS batter_name, "
+        "(TRIM(rp.first_name||' '||rp.last_name)) AS runner_name "
         "FROM game_events e "
         "LEFT JOIN players bp ON bp.id=e.batter_id "
         "LEFT JOIN players rp ON rp.id=e.runner_id "
@@ -272,7 +316,64 @@ def undo_last(game_id: int) -> dict:
     row = c.execute("SELECT id FROM game_events WHERE game_id=? ORDER BY seq DESC LIMIT 1",
                     (game_id,)).fetchone()
     if row:
-        c.execute("DELETE FROM game_events WHERE id=?", (row["id"],))
+        delete_event(game_id, int(row["id"]))
+    return compute_state(game_id)
+
+
+def delete_event(game_id: int, event_id: int) -> dict:
+    """Delete one event from the play log (feature 3). A ``SUB`` marker also
+    reverts the lineup change it created: the newly-inserted row is removed and
+    the player it replaced is re-activated."""
+    c = get_conn()
+    ev = c.execute("SELECT * FROM game_events WHERE id=? AND game_id=?",
+                   (event_id, game_id)).fetchone()
+    if not ev:
+        return compute_state(game_id)
+    if ev["kind"] == "SUB" and ev["detail"]:
+        try:
+            meta = json.loads(ev["detail"])
+        except (ValueError, TypeError):
+            meta = {}
+        new_lid = meta.get("new_lineup_id")
+        old_lid = meta.get("old_lineup_id")
+        if new_lid:
+            c.execute("DELETE FROM game_lineups WHERE id=? AND game_id=?",
+                      (new_lid, game_id))
+        if old_lid:
+            c.execute("UPDATE game_lineups SET active=1 WHERE id=? AND game_id=?",
+                      (old_lid, game_id))
+    c.execute("DELETE FROM game_pitches WHERE event_id=?", (event_id,))
+    c.execute("DELETE FROM game_events WHERE id=? AND game_id=?", (event_id, game_id))
+    c.commit()
+    return compute_state(game_id)
+
+
+_EDITABLE_FIELDS = (
+    "inning", "half", "kind", "batter_id", "pitcher_id", "catcher_id",
+    "runner_id", "result", "detail", "bb_type", "contact", "from_base",
+    "to_base", "charged_to", "credited_to", "rbi", "outs_recorded",
+    "runs_scored", "hit_x", "hit_y", "description",
+)
+
+
+def update_event(game_id: int, event_id: int, data: dict) -> dict:
+    """In-place edit of a single event (feature 3). Base ``advances`` are NOT
+    edited here \u2014 to change how runners moved, delete the play and re-record
+    it. Only scalar scoring fields are patched."""
+    c = get_conn()
+    ev = c.execute("SELECT * FROM game_events WHERE id=? AND game_id=?",
+                   (event_id, game_id)).fetchone()
+    if not ev:
+        return compute_state(game_id)
+    sets, vals = [], []
+    for f in _EDITABLE_FIELDS:
+        if f in data:
+            sets.append(f"{f}=?")
+            vals.append(data[f])
+    if sets:
+        vals.extend([event_id, game_id])
+        c.execute(f"UPDATE game_events SET {', '.join(sets)} WHERE id=? AND game_id=?",
+                  vals)
         c.commit()
     return compute_state(game_id)
 
@@ -284,10 +385,13 @@ def line_score(game_id: int) -> dict:
     reg = st["regulation_innings"]
     max_inn = max([reg] + innings) if innings else reg
     rows = {"away": [], "home": []}
+    played = st.get("played", {})
     for i in range(1, max_inn + 1):
         cell = st["line"].get(i, {"T": 0, "B": 0})
-        rows["away"].append(cell.get("T", 0))
-        rows["home"].append(cell.get("B", 0))
+        pl = played.get(i, {"T": False, "B": False})
+        # Feature 9: leave a half-inning blank (None) until it has had a play.
+        rows["away"].append(cell.get("T", 0) if pl.get("T") else None)
+        rows["home"].append(cell.get("B", 0) if pl.get("B") else None)
     return {
         "innings": list(range(1, max_inn + 1)),
         "away": rows["away"], "home": rows["home"],

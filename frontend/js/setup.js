@@ -3,7 +3,7 @@
 // then jump straight into the live Scorer. Anything missing can be created
 // inline here without leaving the screen.
 const Setup = (() => {
-  const S = { leagueId: null, seasonId: null, awayId: null, homeId: null };
+  const S = { leagueId: null, seasonId: null, awayId: null, homeId: null, tab: 'league' };
   const POSITIONS = ['P','C','1B','2B','3B','SS','LF','CF','RF','DH','UT'];
   const POS_LABELS = {P:'Pitcher',C:'Catcher','1B':'First Base','2B':'Second Base',
     '3B':'Third Base',SS:'Shortstop',LF:'Left Field',CF:'Center Field',
@@ -26,19 +26,65 @@ const Setup = (() => {
     const awayRoster = S.awayId ? await API.roster(S.seasonId, S.awayId) : [];
     const homeRoster = S.homeId ? await API.roster(S.seasonId, S.homeId) : [];
 
+    // Feature 1: four-phase tab navigation League → Game → Lineups → Scoring.
+    const gameReady = !!(S.awayId && S.homeId && S.awayId !== S.homeId
+      && awayRoster.length && homeRoster.length);
+    if ((S.tab === 'lineups' || S.tab === 'scoring') && !gameReady) S.tab = 'game';
+    const tabsBar = setupTabs(gameReady);
+
+    let sections = '';
+    if (S.tab === 'league') {
+      sections = leagueSection(leagues) + seasonSection(seasons);
+    } else if (S.tab === 'game') {
+      sections = teamsSection(teams) + rosterSection(teams, awayRoster, homeRoster)
+        + gameSection(awayRoster, homeRoster);
+    } else if (S.tab === 'lineups') {
+      sections = lineupsPhase();
+    } else if (S.tab === 'scoring') {
+      sections = scoringPhase();
+    }
+
     r.innerHTML = `
       <div class="panel" style="margin-bottom:16px"><div class="panel-body">
         <p class="muted">Create or pick each piece below, then press <b>Start Scoring</b>.
           Anything missing — a league, season, team, or player — can be created right
           here without leaving this screen.</p></div></div>
+      ${tabsBar}
       <div id="wz">
-        ${leagueSection(leagues)}
-        ${seasonSection(seasons)}
-        ${teamsSection(teams)}
-        ${rosterSection(teams, awayRoster, homeRoster)}
-        ${gameSection(awayRoster, homeRoster)}
+        ${sections}
       </div>`;
     bind(r, leagues, seasons, teams);
+  }
+
+  // ---------------------------------------------------------------- tab bar
+  const TABS = [
+    {key:'league', label:'League', ico:'\uD83C\uDFC6'},
+    {key:'game', label:'Game', ico:'\uD83C\uDFDF\uFE0F'},
+    {key:'lineups', label:'Lineups', ico:'\uD83D\uDCCB'},
+    {key:'scoring', label:'Scoring', ico:'\u26BE'},
+  ];
+  function setupTabs(gameReady) {
+    const btns = TABS.map((t) => {
+      const locked = (t.key === 'lineups' || t.key === 'scoring') && !gameReady;
+      return `<button class="setup-tab ${S.tab===t.key?'active':''} ${locked?'is-locked':''}"
+        data-tab="${t.key}" ${locked?'disabled':''}>
+        <span class="nav-ico">${t.ico}</span> ${t.label}</button>`;
+    }).join('');
+    return `<div class="setup-tabs">${btns}</div>`;
+  }
+
+  function lineupsPhase() {
+    return step(1, 'Lineups', `<p class="muted">Batting orders, positions and pitcher
+      slots are set on the live scoring screen once the game opens. Press
+      <b>Start Scoring</b> to create the game and set each team's lineup there.</p>
+      <div class="setup-row" style="margin-top:12px">
+        <button class="btn primary" id="wz-start">▶ Start Scoring</button></div>`, true);
+  }
+  function scoringPhase() {
+    return step(1, 'Scoring', `<p class="muted">Everything is ready. Launch the live
+      scorer to record plays, substitutions and pitches.</p>
+      <div class="setup-row" style="margin-top:12px">
+        <button class="btn primary" id="wz-start">▶ Start Scoring</button></div>`, true);
   }
 
   // ---------------------------------------------------------------- sections
@@ -128,6 +174,12 @@ const Setup = (() => {
   function bind(r, leagues, seasons, teams) {
     const $ = (id) => r.querySelector(id);
     const rerender = () => render(r);
+
+    // Feature 1: tab navigation.
+    r.querySelectorAll('.setup-tab').forEach((b) => b.onclick = () => {
+      if (b.disabled) return;
+      S.tab = b.dataset.tab; rerender();
+    });
 
     if ($('#wz-league')) $('#wz-league').onchange = (e) => {
       S.leagueId = Number(e.target.value) || null; S.seasonId = null;
@@ -236,8 +288,7 @@ const Setup = (() => {
   async function addNew(side, done) {
     const tid = await teamId(side);
     const v = await UI.formModal('Create New Player', [
-      {key:'first_name', label:'First Name', required:true},
-      {key:'last_name', label:'Last Name', required:true},
+      {key:'player_name', label:'Player Name', required:true, placeholder:'e.g. Mike Trout'},
       {key:'primary_position', label:'Primary Position', type:'select',
         options: POSITIONS.map((c) => ({value:c, label:`${c} — ${POS_LABELS[c]}`}))},
       {key:'bats', label:'Bats', type:'select',
@@ -246,6 +297,10 @@ const Setup = (() => {
         options:[{value:'R',label:'Right'},{value:'L',label:'Left'}]},
       {key:'jersey', label:'Jersey #'}]);
     if (!v) return;
+    const _np = String(v.player_name || '').trim().split(/\s+/);
+    v.first_name = _np.shift() || '';
+    v.last_name = _np.join(' ');
+    delete v.player_name;
     const jersey = v.jersey; delete v.jersey;
     const p = await API.post('/players', v);
     await API.post(`/seasons/${S.seasonId}/teams/${tid}/roster`,
