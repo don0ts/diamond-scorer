@@ -141,7 +141,9 @@ const Scorer = (() => {
           <button class="btn ghost sm" id="sc-pt" title="Toggle pitch-by-pitch tracking">Pitches: ${S.pitchTracking?'On':'Off'}</button>
           ${g.status==='in_progress' ? '<button class="btn ghost sm" id="sc-pause">Pause</button>' : ''}
           ${g.status==='paused' ? '<button class="btn primary sm" id="sc-resume">Resume</button>' : ''}
-          ${['final','forfeited'].includes(g.status) ? '' : '<button class="btn sm" id="sc-end" style="border-color:#63263a;color:var(--red)">End Game</button>'}
+          ${['final','forfeited'].includes(g.status)
+            ? '<button class="btn sm" id="sc-reopen" title="Reopen this finished game for editing">▶ Set Live</button>'
+            : '<button class="btn sm" id="sc-end" style="border-color:#63263a;color:var(--red)">End Game</button>'}
         </div>
       </div>`;
   }
@@ -170,11 +172,22 @@ const Scorer = (() => {
     if ($('sc-pause')) $('sc-pause').onclick = () => setStatus('paused');
     if ($('sc-resume')) $('sc-resume').onclick = () => setStatus('in_progress');
     if ($('sc-end')) $('sc-end').onclick = endGame;
+    if ($('sc-reopen')) $('sc-reopen').onclick = reopenGame;
   }
 
   async function setStatus(status) {
     S.game = await API.patch(`/games/${S.gameId}/state`, { status });
     render();
+  }
+
+  // Reopen a finished game (Final/Forfeited) back to Live so plays can be
+  // added, edited or deleted again. The wrap-up fields (W/L/Save, duration,
+  // forfeit) are left as-is; End Game can re-apply them afterwards.
+  async function reopenGame() {
+    if (!(await UI.confirm('Set game Live',
+      'Reopen this finished game for editing? Its status changes back to Live so you can add, edit or delete plays. Use “End Game” again when you are done.'))) return;
+    S.game = await API.patch(`/games/${S.gameId}/state`, { status: 'in_progress' });
+    await reload(); render(); UI.toast('Game is Live — you can edit plays now');
   }
 
   async function togglePitchTracking() {
