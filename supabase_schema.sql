@@ -13,7 +13,8 @@ CREATE TABLE categories (
     name        TEXT NOT NULL UNIQUE,
     min_age     INTEGER NOT NULL CHECK (min_age >= 0),
     max_age     INTEGER NOT NULL CHECK (max_age >= min_age),
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 INSERT INTO categories (name, min_age, max_age) VALUES
@@ -34,7 +35,8 @@ CREATE TABLE tourneys (
     category_id BIGINT NOT NULL REFERENCES categories(id),
     is_event    BOOLEAN NOT NULL DEFAULT FALSE,
     year        INTEGER,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- =========================================
@@ -46,7 +48,8 @@ CREATE TABLE teams (
     abbrev      TEXT,
     place       TEXT,
     category_id BIGINT NOT NULL REFERENCES categories(id),
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- =========================================
@@ -70,7 +73,8 @@ CREATE TABLE players (
     weight_kg       NUMERIC(5,2) CHECK (weight_kg IS NULL OR weight_kg > 0),
     height_cm       INTEGER CHECK (height_cm IS NULL OR height_cm > 0),
     jersey_number   INTEGER CHECK (jersey_number IS NULL OR jersey_number >= 0),
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- =========================================
@@ -207,6 +211,22 @@ BEGIN
     RETURN NEW;
 END;
 $$ language 'plpgsql';
+
+CREATE TRIGGER update_categories_updated_at
+    BEFORE UPDATE ON categories
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_tourneys_updated_at
+    BEFORE UPDATE ON tourneys
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_teams_updated_at
+    BEFORE UPDATE ON teams
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+CREATE TRIGGER update_players_updated_at
+    BEFORE UPDATE ON players
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 CREATE TRIGGER update_games_updated_at
     BEFORE UPDATE ON games
