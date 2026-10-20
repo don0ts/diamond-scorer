@@ -434,21 +434,31 @@ def _stats_filename(tab: str, ext: str) -> str:
 
 @router.get("/stats/export.html")
 def api_stats_export_html(season_id: int | None = None, team_id: int | None = None,
-                          tab: str = "batting", level: str = "basic"):
-    fn = _stats_filename(tab, "html")
+                          tab: str = "batting", level: str = "basic",
+                          mode: str = "player", sort_key: str | None = None,
+                          sort_dir: str | None = None,
+                          min_pa: float = 2.1, min_ip: float = 1.0):
+    fn = _stats_filename((mode + "_" + tab) if mode != "player" else tab, "html")
     html_str = reports.build_stats_html(season_id=season_id, team_id=team_id,
-                                        tab=tab, level=level)
+                                        tab=tab, level=level, mode=mode,
+                                        sort_key=sort_key, sort_dir=sort_dir,
+                                        min_pa=min_pa, min_ip=min_ip)
     return HTMLResponse(content=html_str, headers={
         "Content-Disposition": f'attachment; filename="{fn}"'})
 
 
 @router.get("/stats/export.pdf")
 def api_stats_export_pdf(season_id: int | None = None, team_id: int | None = None,
-                         tab: str = "batting", level: str = "basic"):
-    fn = _stats_filename(tab, "pdf")
+                         tab: str = "batting", level: str = "basic",
+                         mode: str = "player", sort_key: str | None = None,
+                         sort_dir: str | None = None,
+                         min_pa: float = 2.1, min_ip: float = 1.0):
+    fn = _stats_filename((mode + "_" + tab) if mode != "player" else tab, "pdf")
     try:
         pdf_bytes = reports.build_stats_pdf(season_id=season_id, team_id=team_id,
-                                            tab=tab, level=level)
+                                            tab=tab, level=level, mode=mode,
+                                            sort_key=sort_key, sort_dir=sort_dir,
+                                            min_pa=min_pa, min_ip=min_ip)
     except ImportError as exc:
         raise HTTPException(
             500,

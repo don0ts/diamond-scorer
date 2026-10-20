@@ -460,7 +460,8 @@ _SBAT = {
 }
 _SPIT = {
     "basic": [("G","G",0),("W","W",0),("L","L",0),("SV","SV",0),("IP","IP",0),("H","H",0),
-        ("R","R",0),("ER","ER",0),("BB","BB",0),("SO","SO",0),("ERA","ERA",2),("WHIP","WHIP",2)],
+        ("R","R",0),("ER","ER",0),("BB","BB",0),("SO","SO",0),("ERA","ERA",2),("WHIP","WHIP",2),
+        ("BAA","BAA",1)],
     "advanced": [("HR","HR",0),("HBP","HBP",0),("K9","K/9",2),("BB9","BB/9",2),
         ("KBB","K/BB",2),("RA9","RA/9",2)],
     "detailed": [("BF","BF",0),("Pit","Pit",0),("Str%","Str%",1),("Sw%","Sw%",1),
@@ -606,7 +607,189 @@ def _stats_doc_html(title, header, body):
     )
 
 
-def build_stats_html(season_id=None, team_id=None, tab="batting", level="basic") -> str:
+# Leaders mode ------------------------------------------------------------
+_LEAD_TITLE = {"batting": "Batting Leaders", "pitching": "Pitching Leaders"}
+# (label, key, direction, min_kind, fmt)
+_LEAD_BAT = [
+    ("AVG de Bateo", "AVG", "desc", "pa", "r3"),
+    ("Sencillos", "1B", "desc", None, "int"),
+    ("Dobles", "2B", "desc", None, "int"),
+    ("Triples", "3B", "desc", None, "int"),
+    ("Home Runs", "HR", "desc", None, "int"),
+    ("Bases Robadas", "SB", "desc", None, "int"),
+    ("Carreras Anotadas", "R", "desc", None, "int"),
+    ("Carreras Impulsadas", "RBI", "desc", None, "int"),
+    ("OBP", "OBP", "desc", "pa", "r3"),
+    ("SLG", "SLG", "desc", "pa", "r3"),
+    ("OPS", "OPS", "desc", "pa", "r3"),
+]
+_LEAD_PIT = [
+    ("Efectividad", "ERA", "asc", "ip", "r2"),
+    ("Innings Lanzados", "IPnum", "desc", None, "ip"),
+    ("Ponches", "SO", "desc", None, "int"),
+    ("Porcentaje Juegos Ganados", "WLPCT", "desc", None, "r3"),
+    ("Juegos Ganados", "W", "desc", None, "int"),
+    ("Juegos Perdidos", "L", "desc", None, "int"),
+    ("Juegos Salvados", "SV", "desc", None, "int"),
+    ("WHIP", "WHIP", "asc", "ip", "r2"),
+    ("Avg Bateo en Contra", "BAA", "asc", "ip", "r3"),
+]
+
+
+def _lead_val(row, key):
+    if key == "1B":
+        return (row.get("H", 0) - row.get("2B", 0)
+                - row.get("3B", 0) - row.get("HR", 0))
+    if key == "WLPCT":
+        w, l = row.get("W", 0), row.get("L", 0)
+        return (w / (w + l)) if (w + l) else 0.0
+    if key == "IPnum":
+        return row.get("Outs", 0) / 3.0
+    return row.get(key, 0) or 0
+
+
+def _lead_qualifies(row, team_games, min_pa, min_ip, kind):
+    if not kind:
+        return True
+    tg = team_games.get(row.get("team_id"), 0) or 0
+    if kind == "pa":
+        return row.get("PA", 0) >= min_pa * tg
+    if kind == "ip":
+        return (row.get("Outs", 0) / 3.0) >= min_ip * tg
+    return True
+
+
+def _lead_fmt(row, key, fmt):
+    v = _lead_val(row, key)
+    if fmt == "ip":
+        return str(row.get("IP", ""))
+    if fmt == "r3":
+        s = "%.3f" % float(v)
+        return s.lstrip("0") if s[:1] != "-" else "-" + s[1:].lstrip("0")
+    if fmt == "r2":
+        return "%.2f" % float(v)
+    return str(int(v))
+
+
+def _leaders_rows(data, pool, spec, team_games, min_pa, min_ip):
+    """Return top-5 (name, team, display) for one leader category."""
+    label, key, direction, kind, fmt = spec
+    cand = [r for r in pool if _lead_qualifies(r, team_games, min_pa, min_ip, kind)]
+    cand.sort(key=lambda r: _lead_val(r, key), reverse=(direction == "desc"))
+    out = []
+    for r in cand[:5]:
+        out.append((r.get("name", ""), r.get("team", "") or "",
+                    _lead_fmt(r, key, fmt)))
+    return out
+
+
+def _lead_card_html(spec, rows):
+    label = spec[0]
+    if not rows:
+        inner = '<p class="nodata">No qualifying players.</p>'
+    else:
+        body = "".join(
+            '<tr><td class="l">%d</td><td class="l">%s</td>'
+            '<td class="l">%s</td><td>%s</td></tr>'
+            % (i, _e(nm), _e(tm), _e(val))
+            for i, (nm, tm, val) in enumerate(rows, 1))
+        inner = ('<table class="box"><thead><tr><th class="l">#</th>'
+                 '<th class="l">Player</th><th class="l">Tm</th>'
+                 '<th>Value</th></tr></thead><tbody>%s</tbody></table>' % body)
+    return ('<div class="sect"><div class="sect-title">%s</div>'
+            '<div class="card2">%s</div></div>' % (_e(label.upper()), inner))
+
+
+def _leaders_sections_html(data, tab, team_games, min_pa, min_ip):
+    parts = []
+    if tab in ("all", "batting"):
+        for spec in _LEAD_BAT:
+            parts.append(_lead_card_html(
+                spec, _leaders_rows(data, data.get("batting", []), spec,
+                                    team_games, min_pa, min_ip)))
+    if tab in ("all", "pitching"):
+        for spec in _LEAD_PIT:
+            parts.append(_lead_card_html(
+                spec, _leaders_rows(data, data.get("pitching", []), spec,
+                                    team_games, min_pa, min_ip)))
+    return "".join(parts)
+
+
+def _mode_rows(data, mode, sub):
+    if mode == "team":
+        return list(data.get("team_" + sub, []))
+    return list(data.get(sub, []))
+
+
+def _apply_sort(rows, sort_key, sort_dir):
+    if not sort_key:
+        return rows
+    def kf(r):
+        if sort_key == "IP":
+            return r.get("Outs", 0)
+        if sort_key == "name":
+            return (r.get("name") or "")
+        v = r.get(sort_key)
+        return 0 if v is None else v
+    try:
+        return sorted(rows, key=kf, reverse=(sort_dir == "desc"))
+    except TypeError:
+        return sorted(rows, key=lambda r: str(kf(r)),
+                      reverse=(sort_dir == "desc"))
+
+
+def _stats_table_html2(rows, tab, level, first_label="Player"):
+    cols = _stat_cols(tab, level)
+    head = ('<th class="l">%s</th><th class="l">Tm</th>' % _e(first_label)
+            + "".join('<th>%s</th>' % _e(l) for _, l, _ in cols))
+    body = []
+    for row in rows:
+        tds = "".join('<td>%s</td>' % _e(_sfmt(row.get(k), rt)) for k, _, rt in cols)
+        body.append('<tr><td class="l">%s</td><td class="l">%s</td>%s</tr>'
+                    % (_e(row.get("name")), _e(row.get("team") or ""), tds))
+    if not body:
+        return '<p class="nodata">No qualifying rows in this scope yet.</p>'
+    return ('<table class="box"><thead><tr>%s</tr></thead><tbody>%s</tbody></table>'
+            % (head, "".join(body)))
+
+
+def build_stats_html(season_id=None, team_id=None, tab="batting", level="basic",
+                     mode="player", sort_key=None, sort_dir=None,
+                     min_pa=2.1, min_ip=1.0) -> str:
+    data = stats.stats(season_id=season_id, team_id=team_id)
+    league, season, team = _stats_meta(season_id, team_id)
+    gc = data["game_count"]
+    if mode == "leaders":
+        rn = None if tab == "all" else _LEAD_TITLE.get(tab)
+        header = _stats_header_html(league, season, team, level, gc, report_name=rn)
+        body = _leaders_sections_html(data, tab, data.get("team_games", {}),
+                                      min_pa, min_ip)
+        return _stats_doc_html("Player Leaders", header, body)
+    first_label = "Team" if mode == "team" else "Player"
+    all_title = ("All Collective Statistics" if mode == "team"
+                 else "All Individual Statistics")
+    if tab == "all":
+        header = _stats_header_html(league, season, team, level, gc, report_name=None)
+        sects = []
+        for sub, label in (("batting", "Batting"), ("pitching", "Pitching"),
+                           ("fielding", "Fielding")):
+            rows = _mode_rows(data, mode, sub)
+            sects.append('<div class="sect"><div class="sect-title">%s</div>'
+                         '<div class="card2">%s</div></div>'
+                         % (label.upper(),
+                            _stats_table_html2(rows, sub, level, first_label)))
+        return _stats_doc_html(all_title, header, "".join(sects))
+    report_name = _stats_title(tab)
+    header = _stats_header_html(league, season, team, level, gc, report_name=report_name)
+    if tab == "standings":
+        body = _standings_table_html(data)
+    else:
+        rows = _apply_sort(_mode_rows(data, mode, tab), sort_key, sort_dir)
+        body = _stats_table_html2(rows, tab, level, first_label)
+    return _stats_doc_html(report_name + " Statistics", header, body)
+
+
+def _OLD_build_stats_html(season_id=None, team_id=None, tab="batting", level="basic") -> str:
     data = stats.stats(season_id=season_id, team_id=team_id)
     league, season, team = _stats_meta(season_id, team_id)
     gc = data["game_count"]
@@ -626,7 +809,9 @@ def build_stats_html(season_id=None, team_id=None, tab="batting", level="basic")
     return _stats_doc_html(report_name + " Statistics", header, body)
 
 
-def build_stats_pdf(season_id=None, team_id=None, tab="batting", level="basic") -> bytes:
+def build_stats_pdf(season_id=None, team_id=None, tab="batting", level="basic",
+                    mode="player", sort_key=None, sort_dir=None,
+                    min_pa=2.1, min_ip=1.0) -> bytes:
     import io
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER
@@ -670,15 +855,30 @@ def build_stats_pdf(season_id=None, team_id=None, tab="batting", level="basic") 
 
     def _player_table(sub_tab):
         cols = _stat_cols(sub_tab, level)
-        header = ["Player", "Tm"] + [l for _, l, _ in cols]
-        rows = data.get(sub_tab, [])
+        first = "Team" if mode == "team" else "Player"
+        header = [first, "Tm"] + [l for _, l, _ in cols]
+        rows = _mode_rows(data, mode, sub_tab)
+        if sub_tab == tab:
+            rows = _apply_sort(rows, sort_key, sort_dir)
         if not rows:
-            return Paragraph("No qualifying players in this scope yet.", meta)
+            return Paragraph("No qualifying rows in this scope yet.", meta)
         tdata = [header]
         for row in rows:
             tdata.append([str(row.get("name", "")), str(row.get("team", "") or "")]
                          + [_sfmt(row.get(k), rt) for k, _, rt in cols])
         return _table(tdata, 2)
+
+    def _leader_table(spec):
+        pool = (data.get("batting", []) if spec in _LEAD_BAT
+                else data.get("pitching", []))
+        rows = _leaders_rows(data, pool, spec, data.get("team_games", {}),
+                             min_pa, min_ip)
+        if not rows:
+            return Paragraph("No qualifying players.", meta)
+        tdata = [["#", "Player", "Tm", "Value"]]
+        for i, (nm, tm, val) in enumerate(rows, 1):
+            tdata.append([str(i), str(nm), str(tm), str(val)])
+        return _table(tdata, 3)
 
     def _standings_table():
         cols = _SSTAND
@@ -692,8 +892,15 @@ def build_stats_pdf(season_id=None, team_id=None, tab="batting", level="basic") 
                          + [_sfmt(row.get(k), rt) for k, _, rt in cols])
         return _table(tdata, 2)
 
+    is_leaders = (mode == "leaders")
     is_all = (tab == "all")
-    doc_title = "All Individual Statistics" if is_all else (_stats_title(tab) + " Statistics")
+    if is_leaders:
+        doc_title = "Player Leaders"
+    elif is_all:
+        doc_title = ("All Collective Statistics" if mode == "team"
+                     else "All Individual Statistics")
+    else:
+        doc_title = _stats_title(tab) + " Statistics"
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(A4), leftMargin=12 * mm,
                             rightMargin=12 * mm, topMargin=14 * mm, bottomMargin=14 * mm,
@@ -704,12 +911,24 @@ def build_stats_pdf(season_id=None, team_id=None, tab="batting", level="basic") 
     if season:
         story.append(Paragraph(_e(season), meta))
     story.append(Paragraph(_e(team or "All Teams"), meta))
-    if not is_all:
+    if is_leaders and not is_all:
+        story.append(Paragraph(_e(_LEAD_TITLE.get(tab, "Leaders").upper()), rtitle))
+    elif not is_leaders and not is_all:
         story.append(Paragraph(_e(_stats_title(tab).upper()), rtitle))
     story.append(Paragraph(_e(_scope_line(team, level, gc)), scope))
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#c3cfe0"),
                             spaceBefore=2, spaceAfter=12))
-    if is_all:
+    if is_leaders:
+        specs = []
+        if tab in ("all", "batting"):
+            specs += _LEAD_BAT
+        if tab in ("all", "pitching"):
+            specs += _LEAD_PIT
+        for spec in specs:
+            story.append(Paragraph(_e(spec[0].upper()), sect))
+            story.append(_leader_table(spec))
+            story.append(Spacer(1, 10))
+    elif is_all:
         for sub_tab, label in (("batting", "Batting"), ("pitching", "Pitching"),
                                ("fielding", "Fielding")):
             story.append(Paragraph(label.upper(), sect))

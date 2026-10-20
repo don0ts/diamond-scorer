@@ -111,7 +111,7 @@ def _blank_bat() -> dict[str, Any]:
 def _blank_pit() -> dict[str, Any]:
     return {k: 0 for k in (
         "G", "BF", "Outs", "H", "R", "ER", "HR", "BB", "IBB", "SO", "HBP",
-        "W", "L", "SV", "Pit", "Str", "Sw", "Whiff")}
+        "SF", "SAC", "W", "L", "SV", "Pit", "Str", "Sw", "Whiff")}
 
 
 def _blank_fld() -> dict[str, Any]:
@@ -252,6 +252,10 @@ def _accumulate(games: list[dict]) -> dict[str, Any]:
                         p["HBP"] += 1
                     if res in K_CODES:
                         p["SO"] += 1
+                    if res == "SF":
+                        p["SF"] += 1
+                    if res == "SAC":
+                        p["SAC"] += 1
                 p["Outs"] += e["outs_recorded"] or 0
                 runs = e["runs_scored"] or 0
                 p["R"] += runs
@@ -380,6 +384,7 @@ def _finish_batting(pid, s, nm, tm, teams):
     row = dict(s)
     row.update({
         "player_id": pid, "name": nm.get(pid, f"#{pid}"),
+        "team_id": tm.get(pid),
         "team": (teams.get(tm.get(pid), {}) or {}).get("abbrev")
                  or (teams.get(tm.get(pid), {}) or {}).get("name", ""),
         "AVG": avg, "OBP": obp, "SLG": slg, "OPS": round(obp + slg, 3),
@@ -398,12 +403,14 @@ def _finish_pitching(pid, s, nm, tm, teams):
     row = dict(s)
     row.update({
         "player_id": pid, "name": nm.get(pid, f"#{pid}"),
+        "team_id": tm.get(pid),
         "team": (teams.get(tm.get(pid), {}) or {}).get("abbrev")
                  or (teams.get(tm.get(pid), {}) or {}).get("name", ""),
         "IP": ip_disp,
         "ERA": round(9 * s["ER"] / ip, 2) if ip else 0.0,
         "RA9": round(9 * s["R"] / ip, 2) if ip else 0.0,
         "WHIP": round((s["H"] + s["BB"]) / ip, 2) if ip else 0.0,
+        "BAA": _rate(s["H"], s["BF"] - s["BB"] - s["HBP"] - s["SF"] - s["SAC"]),
         "K9": round(9 * s["SO"] / ip, 2) if ip else 0.0,
         "BB9": round(9 * s["BB"] / ip, 2) if ip else 0.0,
         "KBB": round(s["SO"] / s["BB"], 2) if s["BB"] else s["SO"],
@@ -419,6 +426,7 @@ def _finish_fielding(pid, s, nm, tm, teams):
     tc = s["PO"] + s["A"] + s["E"]
     row.update({
         "player_id": pid, "name": nm.get(pid, f"#{pid}"),
+        "team_id": tm.get(pid),
         "team": (teams.get(tm.get(pid), {}) or {}).get("abbrev")
                  or (teams.get(tm.get(pid), {}) or {}).get("name", ""),
         "TC": tc,
@@ -502,11 +510,49 @@ def stats(league_id=None, season_id=None, team_id=None) -> dict[str, Any]:
                 for pid, s in acc["pit"].items() if keep(pid) and (s["BF"] or s["Outs"] or s["G"])]
     fielding = [_finish_fielding(pid, s, nm, tm, teams)
                 for pid, s in acc["fld"].items() if keep(pid)]
-    batting.sort(key=lambda r: (-r["OPS"], -r["H"]))
+    batting.sort(key=lambda r: (-r["AVG"], -r["H"]))
     pitching.sort(key=lambda r: (r["ERA"] if r["Outs"] else 9e9, -r["SO"]))
     fielding.sort(key=lambda r: (-r["cCS"], r["E"]))
+
+    # team games played (both sides of every in-scope game)
+    team_games: dict[int, int] = {}
+    for g in games:
+        for t in (g["away_team_id"], g["home_team_id"]):
+            team_games[t] = team_games.get(t, 0) + 1
+
+    from collections import defaultdict
+
+    def _agg(raw_by_pid, blank_fn, finish_fn):
+        grp: dict[int, dict] = defaultdict(blank_fn)
+        keys = list(blank_fn().keys())
+        for pid, s in raw_by_pid.items():
+            t = tm.get(pid)
+            if t is None or not keep(pid):
+                continue
+            gg = grp[t]
+            for k in keys:
+                gg[k] += s.get(k, 0)
+        out = []
+        for t, s in grp.items():
+            row = finish_fn(t, s, {t: (teams.get(t, {}) or {}).get("name", f"#{t}")},
+                            {t: t}, teams)
+            row["G"] = team_games.get(t, 0)
+            row["team_id"] = t
+            row["name"] = (teams.get(t, {}) or {}).get("name", f"#{t}")
+            out.append(row)
+        return out
+
+    team_batting = _agg(acc["bat"], _blank_bat, _finish_batting)
+    team_pitching = _agg(acc["pit"], _blank_pit, _finish_pitching)
+    team_fielding = _agg(acc["fld"], _blank_fld, _finish_fielding)
+    team_batting.sort(key=lambda r: (-r["AVG"], -r["H"]))
+    team_pitching.sort(key=lambda r: (r["ERA"] if r["Outs"] else 9e9, -r["SO"]))
+    team_fielding.sort(key=lambda r: (-r["FPCT"], r["E"]))
+
     return {
         "batting": batting, "pitching": pitching, "fielding": fielding,
+        "team_batting": team_batting, "team_pitching": team_pitching,
+        "team_fielding": team_fielding, "team_games": team_games,
         "standings": _standings(games), "game_count": len(games),
     }
 
