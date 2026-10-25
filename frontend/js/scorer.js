@@ -725,6 +725,108 @@ const Scorer = (() => {
   const BB_TYPES = [['GB','Ground ball'],['LD','Line drive'],['FB','Fly ball'],['PU','Pop up']];
   const CONTACT = [['soft','Soft'],['avg','Average'],['hard','Hard']];
 
+  // ---- Spray-chart field (ported from the charting tool) --------------------
+  // Clickable position sectors painted over a grass/dirt diamond. viewBox is
+  // 424x460 with (0,0) top-left; home plate sits near the bottom centre.
+  const FIELD_VB_W = 424, FIELD_VB_H = 460;
+  const FIELD_HOME = { x: 212, y: 418 };
+  const FIELD_FENCE = 300;
+  const fieldPt = (deg, r) => { const t = deg * Math.PI / 180; return { x: FIELD_HOME.x + r * Math.sin(t), y: FIELD_HOME.y - r * Math.cos(t) }; };
+  const POS_CENTERS = {
+    P: fieldPt(0, 72), C: fieldPt(0, 13),
+    '1B': fieldPt(33.75, 112), '2B': fieldPt(11.25, 112), '3B': fieldPt(-33.75, 112), SS: fieldPt(-11.25, 112),
+    LF: fieldPt(-30, 232), CF: fieldPt(0, 238), RF: fieldPt(30, 232),
+  };
+  // Closest fielder to a click (used to auto-select the position).
+  function nearestFieldPos(sx, sy) {
+    let best = null, bd = 1e12;
+    Object.keys(POS_CENTERS).forEach((k) => { const c = POS_CENTERS[k]; const d = (c.x-sx)*(c.x-sx) + (c.y-sy)*(c.y-sy); if (d < bd) { bd = d; best = k; } });
+    return best;
+  }
+  function sprayFieldSvg() {
+    const pt = fieldPt; const f = (n) => n.toFixed(1);
+    function sector(d1, d2, rIn, rOut) {
+      const steps = Math.max(2, Math.ceil(Math.abs(d2-d1)/3));
+      const out = [], inn = [];
+      for (let i=0;i<=steps;i++){ out.push(pt(d1+(d2-d1)*i/steps,rOut)); }
+      for (let i=steps;i>=0;i--){ inn.push(pt(d1+(d2-d1)*i/steps,rIn)); }
+      return 'M'+out.concat(inn).map((p)=>f(p.x)+','+f(p.y)).join(' L')+' Z';
+    }
+    const IF_IN=24, IF_OUT=160, OF_IN=160, OF_OUT=FIELD_FENCE, ARC=158, BR1=104, BR2=147;
+    const OVER=[
+      {pos:'LF',d1:-45,d2:-15,rIn:OF_IN,rOut:OF_OUT},
+      {pos:'CF',d1:-15,d2:15,rIn:OF_IN,rOut:OF_OUT},
+      {pos:'RF',d1:15,d2:45,rIn:OF_IN,rOut:OF_OUT},
+      {pos:'3B',d1:-45,d2:-22.5,rIn:IF_IN,rOut:IF_OUT},
+      {pos:'SS',d1:-22.5,d2:0,rIn:IF_IN,rOut:IF_OUT},
+      {pos:'2B',d1:0,d2:22.5,rIn:IF_IN,rOut:IF_OUT},
+      {pos:'1B',d1:22.5,d2:45,rIn:IF_IN,rOut:IF_OUT},
+    ];
+    const arc=(d1,d2,r)=>{const st=Math.max(2,Math.ceil(Math.abs(d2-d1)/3));let a=[];for(let i=0;i<=st;i++)a.push(pt(d1+(d2-d1)*i/st,r));return 'M'+a.map((p)=>f(p.x)+','+f(p.y)).join(' L');};
+    let svg='<svg id="fp-svg" viewBox="0 0 '+FIELD_VB_W+' '+FIELD_VB_H+'" class="field-svg" preserveAspectRatio="none">';
+    svg+='<defs>'
+      +'<linearGradient id="grassG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#53a96c"/><stop offset="100%" stop-color="#2f8049"/></linearGradient>'
+      +'<linearGradient id="dirtG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#d8ab74"/><stop offset="100%" stop-color="#bd8a53"/></linearGradient>'
+      +'<linearGradient id="skyG" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#0f1a2b"/><stop offset="100%" stop-color="#17263c"/></linearGradient>'
+      +'</defs>';
+    svg+='<rect x="0" y="0" width="'+FIELD_VB_W+'" height="'+FIELD_VB_H+'" fill="url(#skyG)" pointer-events="none"/>';
+    svg+='<path d="'+sector(-45,45,0,OF_OUT)+'" fill="url(#grassG)" pointer-events="none"/>';
+    for(let k=0;k<6;k++){ if(k%2===0){ const a1=-45+k*15; svg+='<path d="'+sector(a1,a1+15,0,OF_OUT)+'" fill="rgba(255,255,255,0.035)" pointer-events="none"/>'; } }
+    svg+='<path d="'+sector(-45,45,OF_OUT-9,OF_OUT)+'" fill="rgba(168,120,72,0.5)" pointer-events="none"/>';
+    svg+='<path d="'+sector(-45,45,0,ARC)+'" fill="url(#dirtG)" pointer-events="none"/>';
+    const g_h=pt(0,30), g1=pt(45,88), g2=pt(0,128), g3=pt(-45,88);
+    svg+='<polygon points="'+f(g_h.x)+','+f(g_h.y)+' '+f(g1.x)+','+f(g1.y)+' '+f(g2.x)+','+f(g2.y)+' '+f(g3.x)+','+f(g3.y)+'" fill="url(#grassG)" pointer-events="none"/>';
+    svg+='<path d="'+arc(-45,45,ARC)+'" class="fld-grassline" fill="none" pointer-events="none"/>';
+    const lfp=pt(-45,OF_OUT), rfp=pt(45,OF_OUT);
+    svg+='<line x1="'+f(FIELD_HOME.x)+'" y1="'+f(FIELD_HOME.y)+'" x2="'+f(lfp.x)+'" y2="'+f(lfp.y)+'" class="fld-foul" pointer-events="none"/>';
+    svg+='<line x1="'+f(FIELD_HOME.x)+'" y1="'+f(FIELD_HOME.y)+'" x2="'+f(rfp.x)+'" y2="'+f(rfp.y)+'" class="fld-foul" pointer-events="none"/>';
+    let fence=[]; for(let d=-45;d<=45;d+=2) fence.push(pt(d,OF_OUT));
+    svg+='<polyline points="'+fence.map((p)=>f(p.x)+','+f(p.y)).join(' ')+'" class="fld-fence" pointer-events="none"/>';
+    const b1=pt(45,BR1),b2=pt(0,BR2),b3=pt(-45,BR1);
+    svg+='<polygon points="'+f(FIELD_HOME.x)+','+f(FIELD_HOME.y)+' '+f(b1.x)+','+f(b1.y)+' '+f(b2.x)+','+f(b2.y)+' '+f(b3.x)+','+f(b3.y)+'" class="fld-diamond" pointer-events="none"/>';
+    OVER.forEach((s2)=>{ svg+='<path class="fld-sect" data-pos="'+s2.pos+'" data-num="'+POS_TO_NUM[s2.pos]+'" d="'+sector(s2.d1,s2.d2,s2.rIn,s2.rOut)+'"/>'; });
+    svg+='<path class="fld-sect" data-pos="C" data-num="2" d="'+sector(-45,45,0,IF_IN)+'"/>';
+    const mo=POS_CENTERS.P; svg+='<circle class="fld-sect" data-pos="P" data-num="1" cx="'+f(mo.x)+'" cy="'+f(mo.y)+'" r="22"/>';
+    const base=(b)=>'<polygon points="'+f(b.x)+','+f(b.y-5)+' '+f(b.x+5)+','+f(b.y)+' '+f(b.x)+','+f(b.y+5)+' '+f(b.x-5)+','+f(b.y)+'" class="fld-base" pointer-events="none"/>';
+    svg+=base(b1)+base(b2)+base(b3);
+    svg+='<polygon points="'+f(FIELD_HOME.x)+','+f(FIELD_HOME.y-6)+' '+f(FIELD_HOME.x+6)+','+f(FIELD_HOME.y-1)+' '+f(FIELD_HOME.x+4)+','+f(FIELD_HOME.y+6)+' '+f(FIELD_HOME.x-4)+','+f(FIELD_HOME.y+6)+' '+f(FIELD_HOME.x-6)+','+f(FIELD_HOME.y-1)+'" class="fld-base" pointer-events="none"/>';
+    svg+='<circle class="fld-mound" cx="'+f(mo.x)+'" cy="'+f(mo.y)+'" r="14" pointer-events="none"/>';
+    svg+='<rect class="fld-rubber" x="'+f(mo.x-4)+'" y="'+f(mo.y-1.3)+'" width="8" height="2.6" rx="0.6" pointer-events="none"/>';
+    Object.keys(POS_CENTERS).forEach((k)=>{ const c=POS_CENTERS[k]; svg+='<text x="'+f(c.x)+'" y="'+f(c.y+(k==='P'?3:0))+'" class="fld-lbl'+(k==='P'?' fld-lbl-sm':'')+'" pointer-events="none">'+k+'</text>'; });
+    svg+='<text x="'+(FIELD_VB_W/2)+'" y="22" class="fld-hr-lbl" pointer-events="none">Beyond the fence = Home Run</text>';
+    svg+='<g id="fp-marker" pointer-events="none" style="display:none"><circle class="fld-marker-ring" r="9"/><circle class="fld-marker-dot" r="3.4"/></g>';
+    svg+='</svg>';
+    return svg;
+  }
+
+  // Selectable "circular" base-advance picker. Renders a row of round buttons
+  // plus a hidden <select class> so compute()/payload code can keep reading
+  // .value and listening for 'change'. The force-advance default (sel) is
+  // honoured exactly like the old destSelect().
+  function destPicker(cls, from, sel) {
+    let opts;
+    if (from === 0) opts = [['OUT','Out'],['1','1B'],['2','2B'],['3','3B'],['H','HR']];
+    else if (from === 1) opts = [['1','1B'],['2','2B'],['3','3B'],['H','Home'],['OUT','Out']];
+    else if (from === 2) opts = [['2','2B'],['3','3B'],['H','Home'],['OUT','Out']];
+    else opts = [['3','3B'],['H','Home'],['OUT','Out']];
+    const sv = String(sel);
+    const o = opts.map(([v,l]) => `<option value="${v}" ${v===sv?'selected':''}>${l}</option>`).join('');
+    const btns = opts.map(([v,l]) =>
+      `<button type="button" class="rz-dp-btn ${v==='OUT'?'is-out':''} ${v===sv?'on':''}" data-dp="${cls}" data-val="${v}">${l}</button>`).join('');
+    return `<div class="rz-dp" data-dpwrap="${cls}" data-from="${from}">${btns}`
+      + `<select class="${cls} rz-dp-hidden" data-from="${from}" style="display:none">${o}</select></div>`;
+  }
+  function bindDestPickers(m) {
+    m.querySelectorAll('.rz-dp').forEach((wrap) => {
+      const sel = wrap.querySelector('select');
+      wrap.querySelectorAll('.rz-dp-btn').forEach((b) => b.onclick = () => {
+        sel.value = b.dataset.val;
+        wrap.querySelectorAll('.rz-dp-btn').forEach((x) => x.classList.toggle('on', x === b));
+        sel.dispatchEvent(new Event('change'));
+      });
+    });
+  }
+
   // Render either a button "picker" (default) or a classic dropdown for a
   // single-choice field, honouring the user's Preferences setting. In both
   // cases a real (possibly hidden) <select id> is emitted so downstream code
@@ -877,63 +979,125 @@ const Scorer = (() => {
     const defBB = BB_AUTO[code] || '';
     const bbSel = (v) => BB_TYPES.map(([val,l])=>`<option value="${val}" ${val===defBB?'selected':''}>${l}</option>`).join('');
     const battedFields = info.batted ? `
-      <div class="field"><label>Where did the ball land? (click the field)</label>
-        <div class="fieldpick">${fieldPickerSvg()}</div>
-        <span class="muted" id="rz-loc" style="font-size:11px">Click the field to mark the drop location (optional but recommended for the spray chart).</span>
+      <div class="field"><label>Where did the ball land? (tap the field)</label>
+        <div class="field-wrap">${sprayFieldSvg()}</div>
+        <span class="muted" id="rz-loc" style="font-size:11px">Tap a position to log where the ball was hit. Behind the plate = C, beyond the fence = HR. Optional but recommended for the spray chart.</span>
       </div>
+      <div class="field"><label>Positions / fielding notation</label>${fielderPicker('rz-fld','')}</div>
       <div class="grid-2" style="grid-template-columns:1fr 1fr;gap:10px">
         <div class="field"><label>Batted-ball type</label>${pickerField('rz-bb', BB_TYPES, defBB)}</div>
         <div class="field"><label>Contact quality</label>${pickerField('rz-ct', CONTACT, '')}</div>
-      </div>
-      <div class="field"><label>Fielder(s) / notation</label>${fielderPicker('rz-fld','')}</div>` : '';
-    const runnerRows = occupied.map((n)=>`<div class="field"><label>Runner on ${n} &middot; ${UI.esc(nameOf(bs[n]))}</label>${destSelect('rz-run', Number(n), forced[n] || n)}</div>`).join('');
+      </div>` : '';
+    const runnerRows = occupied.map((n)=>`<div class="field"><label>Runner on ${n} &middot; ${UI.esc(nameOf(bs[n]))}</label>${destPicker('rz-run', Number(n), forced[n] || n)}</div>`).join('');
     UI.openModal(`
       <div class="modal-head"><h2>${isEdit?'Edit \u00b7 ':''}${UI.esc(info.label)} &middot; ${UI.esc(b.full_name)}</h2>
         <button class="icon-btn" data-x>&times;</button></div>
       <div class="modal-body">
-        <div class="rz-cols${battedFields?'':' rz-onecol'}">
-          ${battedFields?`<div class="rz-col rz-col-left">${battedFields}</div>`:''}
-          <div class="rz-col rz-col-right">
-            <div class="rz-advances">
-              <div class="field"><label>Batter advances to</label>${destSelect('rz-bat', 0, batterDest)}</div>
-              ${runnerRows}
-              <div class="field"><label>RBI</label><input type="number" id="rz-rbi" min="0" value="0"></div>
-            </div>
-            <label class="chk" style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="rz-err" ${((info.cat==='roe'||code==='CI')||(isEdit&&editEv.is_error))?'checked':''}> Error(s) charged on the play</label>
-            <div class="field" id="rz-err-wrap" style="display:none"><label>Error(s) charged to fielder(s) &middot; select one or more</label>
-              <select id="rz-err-on" multiple size="4" style="min-height:96px">${fldOpts('')}</select>
-              <span class="muted" style="font-size:11px">Ctrl/Cmd-click to charge multiple fielders on the same play. Runners' extra bases from the error are set above in "advances to".</span></div>
-            <div class="rz-preview" id="rz-prev"></div>
-          </div>
+        ${battedFields}
+        <div class="rz-advances">
+          <div class="field"><label>Batter advances to</label>${destPicker('rz-bat', 0, batterDest)}</div>
+          ${runnerRows}
+          <div class="field"><label>RBI</label><input type="number" id="rz-rbi" min="0" value="0"></div>
         </div>
+        <label class="chk" style="display:flex;gap:8px;align-items:center;margin:6px 0"><input type="checkbox" id="rz-err" ${((info.cat==='roe'||code==='CI')||(isEdit&&editEv.is_error))?'checked':''}> Error(s) charged on the play</label>
+        <div class="field" id="rz-err-wrap" style="display:none"><label>Error(s) charged to fielder(s) &middot; select one or more</label>
+          <select id="rz-err-on" multiple size="4" style="min-height:96px">${fldOpts('')}</select>
+          <span class="muted" style="font-size:11px">Ctrl/Cmd-click to charge multiple fielders on the same play. Runners' extra bases from the error are set above in "advances to".</span></div>
+        <div class="rz-preview" id="rz-prev"></div>
       </div>
       <div class="modal-foot"><button class="btn ghost" data-cancel>Cancel</button>
         <button class="btn primary" data-ok>${isEdit?'Save Play':'Record Play'}</button></div>`, { wide: true });
     const m = document.getElementById('modal');
     bindPickers(m);
+    bindDestPickers(m);
     bindFielderPicker(m, 'rz-fld');
+    // Programmatically set a button-picker (rz-bb / rz-ct) + repaint its buttons.
+    function setPicker(id, val) {
+      const sel = m.querySelector('#' + id); if (!sel) return; sel.value = val;
+      m.querySelectorAll(`.pk-btn[data-for="${id}"]`).forEach((x) => { const on = x.dataset.val === val && val !== ''; x.classList.toggle('primary', on); x.classList.toggle('ghost', !on); });
+    }
+    // Programmatically set a base-advance picker (rz-bat / rz-run) + repaint.
+    function setDest(cls, val) {
+      const sel = m.querySelector('.' + cls); if (!sel) return; sel.value = val;
+      const wrap = m.querySelector(`[data-dpwrap="${cls}"]`);
+      if (wrap) wrap.querySelectorAll('.rz-dp-btn').forEach((x) => x.classList.toggle('on', x.dataset.val === val));
+      sel.dispatchEvent(new Event('change'));
+    }
     const rbiInput = m.querySelector('#rz-rbi');
     rbiInput.oninput = () => { rbiInput.dataset.touched = '1'; };
 
-    // --- clickable field drop location ---
+    // --- clickable spray field with a charting-style popup ---
     let hit = { x: null, y: null };
     const svg = m.querySelector('#fp-svg');
     if (svg) {
       const marker = m.querySelector('#fp-marker');
-      // Map normalized hit coords onto whatever viewBox the field uses, so the
-      // marker lands exactly where clicked regardless of the field dimensions.
-      const vb = (svg.viewBox && svg.viewBox.baseVal) || { width: 360, height: 250 };
+      const wrap = svg.closest('.field-wrap');
+      let popupEl = null;
+      const closePopup = () => { if (popupEl) { popupEl.remove(); popupEl = null; } };
+      const placeMarker = (sx, sy) => {
+        marker.querySelectorAll('circle').forEach((c) => { c.setAttribute('cx', sx.toFixed(1)); c.setAttribute('cy', sy.toFixed(1)); });
+        marker.style.display = '';
+      };
+      const openFieldPopup = (pos, num, sx, sy, isHR, defBBv) => {
+        closePopup();
+        const wr = wrap.getBoundingClientRect();
+        const px0 = sx / FIELD_VB_W * wr.width, py0 = sy / FIELD_VB_H * wr.height;
+        const curCt = (m.querySelector('#rz-ct') || {}).value || '';
+        popupEl = document.createElement('div');
+        popupEl.className = 'field-popup';
+        const cqBtns = CONTACT.map(([v,l]) => `<button type="button" class="fp-opt${v===curCt?' on':''}" data-cq="${v}">${UI.esc(l)}</button>`).join('');
+        const bbBtns = BB_TYPES.map(([v,l]) => `<button type="button" class="fp-opt${v===defBBv?' on':''}" data-bb="${v}" title="${UI.esc(l)}">${v}</button>`).join('');
+        const btoOpts = [1,2,3,4,5,6,7,8,9].map((n) => `<option value="${n}" ${String(n)===String(num)?'selected':''}>${n} - ${POS_NUM[n]}</option>`).join('');
+        popupEl.innerHTML = `<div class="fp-title">${isHR?'Home Run':'Hit to '+UI.esc(pos)}</div>`
+          + `<div class="fp-row"><span>Contact Quality</span><div class="fp-pick fp-cq">${cqBtns}</div></div>`
+          + `<div class="fp-row"><span>Batted Ball Type</span><div class="fp-pick fp-bb">${bbBtns}</div></div>`
+          + `<div class="fp-row"><span>Batted To</span><select class="fp-bto">${btoOpts}</select></div>`
+          + `<div class="fp-actions"><button type="button" class="btn sm fp-ok">Save Hit</button></div>`;
+        wrap.appendChild(popupEl);
+        const pw = popupEl.offsetWidth, ph = popupEl.offsetHeight;
+        let left = px0 + 14; if (left + pw > wr.width) left = px0 - pw - 14; if (left < 4) left = 4;
+        let top = py0 + 14; if (top + ph > wr.height) top = wr.height - ph - 4; if (top < 4) top = 4;
+        popupEl.style.left = left + 'px'; popupEl.style.top = top + 'px';
+        let pickCt = curCt, pickBB = defBBv || '';
+        const cqWrap = popupEl.querySelector('.fp-cq'), bbWrap = popupEl.querySelector('.fp-bb');
+        const paint = (wrp, attr, val) => wrp.querySelectorAll('.fp-opt').forEach((o) => o.classList.toggle('on', o.getAttribute(attr) === val));
+        cqWrap.querySelectorAll('.fp-opt').forEach((b) => b.onclick = () => { pickCt = (pickCt===b.dataset.cq?'':b.dataset.cq); paint(cqWrap, 'data-cq', pickCt); });
+        bbWrap.querySelectorAll('.fp-opt').forEach((b) => b.onclick = () => { pickBB = (pickBB===b.dataset.bb?'':b.dataset.bb); paint(bbWrap, 'data-bb', pickBB); });
+        popupEl.querySelector('.fp-ok').onclick = () => {
+          const btoNum = popupEl.querySelector('.fp-bto').value;
+          const btoPos = POS_NUM[btoNum] || pos;
+          hit = { x: sx / FIELD_VB_W, y: sy / FIELD_VB_H };
+          setPicker('rz-bb', pickBB); setPicker('rz-ct', pickCt);
+          // Clicking a field area auto-selects the position. A groundout to an
+          // infield spot (3B/SS/2B, not 1B) defaults to assist + 1B out (6-3).
+          let note = String(btoNum);
+          if (code === 'GO' && ['3B','SS','2B'].includes(btoPos)) note = btoNum + '-3';
+          const fld = m.querySelector('#rz-fld'); if (fld) { fld.value = note; fld.dispatchEvent(new Event('input')); }
+          if (isHR) setDest('rz-bat', 'H');
+          const loc = m.querySelector('#rz-loc');
+          if (loc) loc.textContent = `${isHR?'Home run':'Hit to '+btoPos} logged \u00b7 notation ${note}. Tap the field again to change it.`;
+          closePopup(); compute();
+        };
+      };
       svg.addEventListener('click', (ev) => {
         const r = svg.getBoundingClientRect();
-        const vx = (ev.clientX - r.left) / r.width;
-        const vy = (ev.clientY - r.top) / r.height;
-        hit = { x: Math.max(0, Math.min(1, vx)), y: Math.max(0, Math.min(1, vy)) };
-        marker.setAttribute('cx', (hit.x * vb.width).toFixed(1));
-        marker.setAttribute('cy', (hit.y * vb.height).toFixed(1));
-        marker.style.display = '';
-        const loc = m.querySelector('#rz-loc');
-        if (loc) loc.textContent = `Drop location set (${(hit.x*100).toFixed(0)}%, ${(hit.y*100).toFixed(0)}%). Click again to move it.`;
+        const sx = (ev.clientX - r.left) / r.width * FIELD_VB_W;
+        const sy = (ev.clientY - r.top) / r.height * FIELD_VB_H;
+        placeMarker(sx, sy);
+        const dx = sx - FIELD_HOME.x, up = FIELD_HOME.y - sy;
+        const rad = Math.hypot(dx, up);
+        const ang = Math.atan2(dx, up) * 180 / Math.PI;
+        let pos, num, isHR = false;
+        if (up <= 0) { pos = 'C'; num = '2'; }                              // behind the plate -> C
+        else if (rad > FIELD_FENCE && Math.abs(ang) <= 47) { isHR = true; num = ang < -15 ? '7' : (ang > 15 ? '9' : '8'); pos = 'HR'; }
+        else { pos = nearestFieldPos(sx, sy); num = POS_TO_NUM[pos] || ''; }
+        // Auto-detect trajectory from the click: outfield/HR -> fly ball, infield
+        // -> ground ball, unless the result code already fixes it (GO/LO/FO/POP).
+        const isOF = ['LF','CF','RF'].includes(pos) || isHR;
+        const bbv = BB_AUTO[code] || (isOF ? 'FB' : 'GB');
+        openFieldPopup(pos, num, sx, sy, isHR, bbv);
       });
+      document.addEventListener('mousedown', (e) => { if (popupEl && !popupEl.contains(e.target) && !svg.contains(e.target)) closePopup(); }, true);
     }
 
     // --- error fielder picker (default from notation position) ---
