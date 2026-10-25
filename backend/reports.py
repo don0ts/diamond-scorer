@@ -220,20 +220,62 @@ table.box thead th{color:#7f97ba;font-size:10.5px;text-transform:uppercase;
 table.box th.l,table.box td.l{text-align:left}
 table.box td.l{font-weight:600;color:#eaf1fb}
 table.box tbody tr:nth-child(even) td{background:rgba(255,255,255,.018)}
+table.box tbody tr.tot td{font-weight:800;color:#eaf1fb;background:rgba(77,148,255,.10);
+  border-top:1.5px solid #294066}
+table.box tbody tr.tot td.l{color:#9fc2ff;text-transform:uppercase;letter-spacing:.6px;font-size:11px}
 .foot{color:#6f86a8;font-size:11px;margin-top:30px;border-top:1px solid #16243c;
   padding-top:14px;letter-spacing:.2px}
 @media print{body{background:#060b16 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 """
 
 
-def _box_table(rows, cols) -> str:
+def _round3(num, den):
+    return round(num / den, 3) if den else 0.0
+
+
+def _box_totals(rows, kind):
+    """Team totals row: sum the counting stats and recompute the rate stats
+    (AVG/OPS or ERA/WHIP) from those sums rather than averaging per-player
+    rates. Returns a row-shaped dict with name='Totals', or None if no rows."""
+    if not rows:
+        return None
+    def S(k):
+        return sum((r.get(k) or 0) for r in rows)
+    t = {"name": "Totals"}
+    if kind == "pit":
+        for k in ("BF", "H", "R", "ER", "BB", "SO", "HR", "Outs"):
+            t[k] = S(k)
+        ip3 = t["Outs"]
+        ip = ip3 / 3.0
+        t["IP"] = "%d.%d" % (ip3 // 3, ip3 % 3)
+        t["ERA"] = round(9 * t["ER"] / ip, 2) if ip else 0.0
+        t["WHIP"] = round((t["H"] + t["BB"]) / ip, 2) if ip else 0.0
+    else:
+        for k in ("AB", "R", "H", "2B", "3B", "HR", "RBI", "BB", "SO",
+                  "HBP", "SF", "TB"):
+            t[k] = S(k)
+        ab, bb, hbp, sf = t["AB"], t["BB"], t["HBP"], t["SF"]
+        obp = _round3(t["H"] + bb + hbp, ab + bb + hbp + sf)
+        slg = _round3(t["TB"], ab)
+        t["AVG"] = _round3(t["H"], ab)
+        t["OPS"] = round(obp + slg, 3)
+    return t
+
+
+def _box_table(rows, cols, kind=None) -> str:
     if not rows:
         return '<p class="nodata">No data.</p>'
+    if kind is None:
+        kind = "pit" if any(k == "IP" for k, _ in cols) else "bat"
     head = '<th class="l">Player</th>' + "".join('<th>%s</th>' % _e(l) for _, l in cols)
     body = []
     for r in rows:
         tds = "".join('<td>%s</td>' % _e(_fmt(r.get(k), k)) for k, _ in cols)
         body.append('<tr><td class="l">%s</td>%s</tr>' % (_e(r.get("name")), tds))
+    tot = _box_totals(rows, kind)
+    if tot:
+        tds = "".join('<td>%s</td>' % _e(_fmt(tot.get(k), k)) for k, _ in cols)
+        body.append('<tr class="tot"><td class="l">Totals</td>%s</tr>' % tds)
     return ('<table class="box"><thead><tr>%s</tr></thead><tbody>%s</tbody></table>'
             % (head, "".join(body)))
 
@@ -388,6 +430,19 @@ def _spray_drawing(sp):
     return d
 
 
+def _pdf_bg(canvas, doc):
+    """Paint the dark page background + top accent bar so the PDF matches the
+    polished dark HTML export rather than the old white ReportLab look."""
+    from reportlab.lib import colors
+    canvas.saveState()
+    canvas.setFillColor(colors.HexColor("#060b16"))
+    canvas.rect(0, 0, doc.pagesize[0], doc.pagesize[1], fill=1, stroke=0)
+    canvas.setFillColor(colors.HexColor("#4d94ff"))
+    canvas.rect(doc.leftMargin, doc.pagesize[1] - doc.topMargin + 16, 52, 4,
+                fill=1, stroke=0)
+    canvas.restoreState()
+
+
 def build_report_pdf(game_id: int) -> bytes:
     import io
     from reportlab.lib import colors
@@ -401,23 +456,25 @@ def build_report_pdf(game_id: int) -> bytes:
     g = rep["game"]
     ss = getSampleStyleSheet()
     h1 = ParagraphStyle("h1", parent=ss["Title"], fontSize=23, spaceAfter=3, leading=26,
-                        textColor=colors.HexColor("#0b1f3a"))
+                        textColor=colors.HexColor("#eaf1fb"))
     sub = ParagraphStyle("sub", parent=ss["Normal"], fontSize=10.5,
-                         textColor=colors.HexColor("#5a6b82"), spaceAfter=4)
+                         textColor=colors.HexColor("#8aa0c0"), spaceAfter=4)
     h2 = ParagraphStyle("h2", parent=ss["Heading2"], fontSize=10.5, leading=13,
-                        textColor=colors.HexColor("#1c4f8f"), spaceBefore=12, spaceAfter=5,
+                        textColor=colors.HexColor("#4d94ff"), spaceBefore=12, spaceAfter=5,
                         fontName="Helvetica-Bold")
+    foot = ParagraphStyle("foot", parent=ss["Normal"], fontSize=8,
+                          textColor=colors.HexColor("#6f86a8"), spaceBefore=12)
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=16 * mm, rightMargin=16 * mm,
-                            topMargin=15 * mm, bottomMargin=15 * mm,
+                            topMargin=18 * mm, bottomMargin=15 * mm,
                             title="%s @ %s" % (g["away_name"], g["home_name"]))
     story = [Paragraph("%s @ %s" % (_e(g["away_name"]), _e(g["home_name"])), h1)]
     subtxt = _e(g.get("game_date") or "")
     if g.get("venue"):
         subtxt += " &middot; " + _e(g["venue"])
     story.append(Paragraph(subtxt or "&nbsp;", sub))
-    story.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor("#1c4f8f"),
-                            spaceBefore=4, spaceAfter=14, lineCap="round"))
+    story.append(HRFlowable(width="100%", thickness=1.4, color=colors.HexColor("#1c2c48"),
+                            spaceBefore=4, spaceAfter=14))
 
     # line score
     line = rep.get("line") or {}
@@ -429,11 +486,11 @@ def build_report_pdf(game_id: int) -> bytes:
         t = totals.get(sk, {})
         return [name] + [str(per[i]) if i < len(per) else "" for i in range(len(innings))] + \
                [str(t.get("R", 0)), str(t.get("H", 0)), str(t.get("E", 0))]
-    ldata = [header, lrow(g["away_name"], g["away_name"]), lrow(g["home_name"], g["home_name"])]
+    ldata = [header, lrow("away", g["away_name"]), lrow("home", g["home_name"])]
     lt = Table(ldata)
     lt.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1c4f8f")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0d1729")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#7f97ba")),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
@@ -441,36 +498,48 @@ def build_report_pdf(game_id: int) -> bytes:
         ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("ALIGN", (1, 0), (-1, -1), "CENTER"),
         ("ALIGN", (0, 0), (0, -1), "LEFT"),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#eef3fb")]),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.8, colors.HexColor("#1c4f8f")),
-        ("LINEBELOW", (0, 1), (-1, -2), 0.3, colors.HexColor("#dce4f0")),
-        ("BACKGROUND", (-3, 1), (-1, -1), colors.HexColor("#f4f7fb")),
-        ("TEXTCOLOR", (-3, 1), (-1, -1), colors.HexColor("#0b1f3a")),
+        ("BACKGROUND", (0, 1), (-1, -1), colors.HexColor("#0b1424")),
+        ("TEXTCOLOR", (0, 1), (-1, -1), colors.HexColor("#e8eefb")),
+        ("BACKGROUND", (-3, 0), (-1, -1), colors.HexColor("#111f38")),
+        ("TEXTCOLOR", (-3, 1), (-1, -1), colors.HexColor("#9fc2ff")),
         ("FONTNAME", (-3, 1), (-1, -1), "Helvetica-Bold"),
+        ("GRID", (0, 0), (-1, -1), 0.5, colors.HexColor("#16243c")),
+        ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#1c2c48")),
     ]))
     story += [lt, Spacer(1, 14)]
 
-    # heatmap + spray side by side
+    # heatmap + spray side by side (dark cards matching the HTML export)
     hd = _heatmap_drawing(rep["heatmap"])
     sd = _spray_drawing(rep["spray"])
     viz = Table([[Paragraph("Strike-zone heatmap", h2), Paragraph("Spray chart", h2)],
                  [hd, sd]], colWidths=[85 * mm, 85 * mm])
-    viz.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"),
-                             ("ALIGN", (0, 0), (-1, -1), "CENTER")]))
+    viz.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("BACKGROUND", (0, 1), (-1, 1), colors.HexColor("#101d33")),
+        ("BOX", (0, 1), (0, 1), 0.8, colors.HexColor("#1c2c48")),
+        ("BOX", (1, 1), (1, 1), 0.8, colors.HexColor("#1c2c48")),
+        ("TOPPADDING", (0, 1), (-1, 1), 12),
+        ("BOTTOMPADDING", (0, 1), (-1, 1), 12),
+    ]))
     story += [KeepTogether(viz), Spacer(1, 10)]
 
-    def box(side, cols):
-        rows = side
+    def box(rows, cols, kind):
         if not rows:
-            return Paragraph("No data.", ss["Normal"])
+            return Paragraph("No data.", sub)
         head = ["Player"] + [l for _, l in cols]
         data = [head]
         for r in rows:
             data.append([str(r.get("name", ""))] + [_fmt(r.get(k), k) for k, _ in cols])
+        tot = _box_totals(rows, kind)
+        tot_idx = None
+        if tot:
+            data.append(["Totals"] + [_fmt(tot.get(k), k) for k, _ in cols])
+            tot_idx = len(data) - 1
         t = Table(data, repeatRows=1)
-        t.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1c4f8f")),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        cmds = [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#0d1729")),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#7f97ba")),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, 0), 7.5),
             ("FONTSIZE", (0, 1), (-1, -1), 8),
@@ -480,22 +549,35 @@ def build_report_pdf(game_id: int) -> bytes:
             ("RIGHTPADDING", (0, 0), (-1, -1), 6),
             ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
             ("ALIGN", (0, 0), (0, -1), "LEFT"),
+            ("TEXTCOLOR", (0, 1), (-1, -1), colors.HexColor("#d7e2f5")),
             ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
-            ("TEXTCOLOR", (0, 1), (0, -1), colors.HexColor("#0b1f3a")),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#eef3fb")]),
-            ("LINEBELOW", (0, 0), (-1, 0), 0.8, colors.HexColor("#1c4f8f")),
-            ("LINEBELOW", (0, 1), (-1, -2), 0.25, colors.HexColor("#dce4f0")),
-        ]))
+            ("TEXTCOLOR", (0, 1), (0, -1), colors.HexColor("#eaf1fb")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1),
+             [colors.HexColor("#0a1320"), colors.HexColor("#0d1829")]),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#16243c")),
+            ("BOX", (0, 0), (-1, -1), 0.8, colors.HexColor("#1c2c48")),
+        ]
+        if tot_idx is not None:
+            cmds += [
+                ("BACKGROUND", (0, tot_idx), (-1, tot_idx), colors.HexColor("#132544")),
+                ("TEXTCOLOR", (0, tot_idx), (-1, tot_idx), colors.HexColor("#eaf1fb")),
+                ("FONTNAME", (0, tot_idx), (-1, tot_idx), "Helvetica-Bold"),
+                ("TEXTCOLOR", (0, tot_idx), (0, tot_idx), colors.HexColor("#9fc2ff")),
+                ("LINEABOVE", (0, tot_idx), (-1, tot_idx), 1, colors.HexColor("#294066")),
+            ]
+        t.setStyle(TableStyle(cmds))
         return t
 
     for side, label in ((rep["away"], g["away_name"]), (rep["home"], g["home_name"])):
         story.append(Paragraph("%s &mdash; Batting" % _e(label), h2))
-        story.append(box(side["batting"], BAT_COLS))
+        story.append(box(side["batting"], BAT_COLS, "bat"))
         story.append(Paragraph("%s &mdash; Pitching" % _e(label), h2))
-        story.append(box(side["pitching"], PIT_COLS))
+        story.append(box(side["pitching"], PIT_COLS, "pit"))
         story.append(Spacer(1, 8))
 
-    doc.build(story)
+    story.append(Paragraph("Generated by Diamond Scorer &mdash; batted-ball spray is "
+                           "derived from fielder, trajectory and hit value.", foot))
+    doc.build(story, onFirstPage=_pdf_bg, onLaterPages=_pdf_bg)
     return buf.getvalue()
 
 

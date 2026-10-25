@@ -805,7 +805,7 @@ const Scorer = (() => {
   // honoured exactly like the old destSelect().
   function destPicker(cls, from, sel) {
     let opts;
-    if (from === 0) opts = [['OUT','Out'],['1','1B'],['2','2B'],['3','3B'],['H','HR']];
+    if (from === 0) opts = [['OUT','Out'],['1','1B'],['2','2B'],['3','3B'],['H','H']];
     else if (from === 1) opts = [['1','1B'],['2','2B'],['3','3B'],['H','Home'],['OUT','Out']];
     else if (from === 2) opts = [['2','2B'],['3','3B'],['H','Home'],['OUT','Out']];
     else opts = [['3','3B'],['H','Home'],['OUT','Out']];
@@ -971,7 +971,12 @@ const Scorer = (() => {
     const batterDest = code==='HR' ? 'H' : (info.bases>=1 && info.bases<=3 ? String(info.bases) : (info.bases===4?'H':'OUT'));
     // Force-advance chain for the runners already on base (feature 4).
     const bNum = batterDest==='H' ? 4 : (batterDest==='OUT' ? 0 : Number(batterDest));
-    const forced = forcedDest(bNum, bs);
+    // On a ground out the batter still runs to first, so a runner on 1st (and
+    // any chain behind) is force-advanced even though the batter is out. Other
+    // out types (fly/line/pop) are not force plays, so keep bNum as-is.
+    let forceBase = bNum;
+    if (code === 'GO' && forceBase < 1) forceBase = 1;
+    const forced = forcedDest(forceBase, bs);
     const fielders = S.lineups[fieldingSide()] || [];
     const fldOpts = (sel) => fielders.map((x)=>`<option value="${x.player_id}" ${x.player_id==sel?'selected':''}>${UI.esc(x.full_name)}${x.position?` (${x.position})`:''}</option>`).join('');
     // Auto-fill batted-ball type from the out kind: GO->GB, FO->FB, LO->LD, POP->PU.

@@ -161,7 +161,7 @@ table.tbl tr:hover td { background: var(--bg-2); }
 table.tbl .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
 
 /* ---------- Forms ---------- */
-.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
 .field label { font-size: 12.5px; color: var(--txt-1); }
 .field input, .field select, .field textarea {
   background: var(--bg-0); border: 1px solid var(--border-2); color: var(--txt-0);
@@ -201,7 +201,7 @@ table.tbl .row-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .modal-head h2 { margin: 0; font-size: 17px; }
 /* Only the body scrolls; header + footer stay pinned so the Record Play
    button is always visible without scrolling the whole modal. */
-.modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 20px; }
+.modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 14px 18px; }
 .modal-foot { flex: 0 0 auto; display: flex; justify-content: flex-end; gap: 10px; padding: 16px 20px; border-top: 1px solid var(--border); background: var(--panel); }
 .icon-btn { background: transparent; border: 0; color: var(--txt-2); font-size: 20px; cursor: pointer; }
 .icon-btn:hover { color: var(--txt-0); }
@@ -432,7 +432,7 @@ a.link:hover { color:var(--blue-2); }
 .detail-grid .muted { font-size:12px; }
 
 /* ===== In-Play spray field + click-to-popup (ported from charting tool) ===== */
-.field-wrap{position:relative;width:100%;max-width:560px;margin:0 auto;aspect-ratio:424 / 460}
+.field-wrap{position:relative;width:100%;max-width:300px;max-height:300px;margin:0 auto;aspect-ratio:424 / 460}
 .field-svg{width:100%;height:100%;display:block;border-radius:18px;background:#15243a;border:1px solid var(--border);box-shadow:0 8px 24px rgba(0,0,0,0.28);touch-action:manipulation}
 .field-svg .fld-sect{cursor:pointer;fill:rgba(255,255,255,0);stroke:none;transition:fill .14s ease}
 .field-svg .fld-sect:hover{fill:rgba(255,255,255,0.16)}
@@ -460,7 +460,7 @@ a.link:hover { color:var(--blue-2); }
 
 /* circular base-advance pickers (replace the old dropdowns, keep force logic) */
 .rz-dp{display:flex;flex-wrap:wrap;gap:6px}
-.rz-dp-btn{appearance:none;min-width:48px;border:1px solid var(--border-2);background:var(--bg-2);color:var(--txt-1);border-radius:999px;padding:8px 14px;font-size:13px;font-weight:700;cursor:pointer;transition:background .12s,border-color .12s,color .12s}
+.rz-dp-btn{appearance:none;min-width:44px;border:1px solid var(--border-2);background:var(--bg-2);color:var(--txt-1);border-radius:999px;padding:6px 12px;font-size:13px;font-weight:700;cursor:pointer;transition:background .12s,border-color .12s,color .12s}
 .rz-dp-btn:hover{border-color:var(--blue);color:var(--txt-0)}
 .rz-dp-btn.on{background:linear-gradient(90deg,var(--blue),#1a4fb0);border-color:var(--blue);color:#fff}
 .rz-dp-btn.is-out.on{background:linear-gradient(90deg,#b23048,#7e2135);border-color:var(--red)}
