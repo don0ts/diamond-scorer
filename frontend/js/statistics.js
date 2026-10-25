@@ -330,8 +330,8 @@ const Statistics = (() => {
 
   function leadersHtml() {
     const groups = [];
-    if (state.tab === 'all' || state.tab === 'batting') groups.push(['batting', LEAD_BAT, 'Batters']);
-    if (state.tab === 'all' || state.tab === 'pitching') groups.push(['pitching', LEAD_PIT, 'Pitchers']);
+    if (state.tab === 'all' || state.tab === 'batting') groups.push(['batting', LEAD_BAT, 'Bateadores']);
+    if (state.tab === 'all' || state.tab === 'pitching') groups.push(['pitching', LEAD_PIT, 'Lanzadores']);
     const out = [];
     groups.forEach(([poolKey, specs, heading]) => {
       const pool = state.data[poolKey] || [];

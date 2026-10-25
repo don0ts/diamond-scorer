@@ -168,26 +168,61 @@ def spray_svg(sp, size: int = 340) -> str:
 # HTML report (standalone "web" export)
 # ---------------------------------------------------------------------------
 _CSS = """
-*{box-sizing:border-box}body{margin:0;font-family:'Segoe UI',system-ui,Arial,sans-serif;
-background:#070d18;color:#eaf1fb;padding:28px}
-.wrap{max-width:960px;margin:0 auto}
-h1{font-size:24px;margin:0 0 2px}.sub{color:#6f86a8;font-size:14px;margin-bottom:22px}
-.line{border-collapse:collapse;margin:0 0 26px;font-variant-numeric:tabular-nums}
-.line th,.line td{border:1px solid #1e3050;padding:6px 10px;text-align:center;font-size:13px}
-.line th{color:#6f86a8;background:#0f1b2e}.line td.tm{text-align:left;font-weight:600}
-.viz{display:flex;gap:26px;flex-wrap:wrap;margin:0 0 26px;align-items:flex-start}
-.card{background:#0f1b2e;border:1px solid #1e3050;border-radius:12px;padding:16px;flex:1;min-width:320px}
-.card h2{font-size:15px;margin:0 0 12px}.svgbox{max-width:100%}
-.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#a8bbd6;margin-top:10px}
-.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:middle}
-.kv{display:flex;gap:18px;flex-wrap:wrap;font-size:13px;color:#a8bbd6;margin-top:8px}
-.kv b{color:#eaf1fb}.nodata{color:#6f86a8;font-size:13px;padding:20px 0}
-.side{margin:0 0 22px}.side h2{font-size:15px;margin:18px 0 8px;color:#4d94ff}
-table.box{width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums}
-table.box th,table.box td{padding:7px 9px;border-bottom:1px solid #1e3050;text-align:right}
-table.box th{color:#6f86a8;font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;font-family:'Inter','Segoe UI',system-ui,-apple-system,Arial,sans-serif;
+  color:#e8eefb;padding:40px 24px;line-height:1.5;
+  background:#060b16;
+  background-image:radial-gradient(1200px 520px at 50% -140px,rgba(77,148,255,.16),transparent 60%),
+    radial-gradient(900px 500px at 100% 0,rgba(53,208,127,.08),transparent 55%);}
+.wrap{max-width:1000px;margin:0 auto}
+.wrap::before{content:"";display:block;width:52px;height:4px;border-radius:4px;
+  background:linear-gradient(90deg,#4d94ff,#35d07f);margin:0 0 20px}
+h1{font-size:30px;line-height:1.15;margin:0 0 6px;font-weight:800;letter-spacing:-.5px;
+  background:linear-gradient(90deg,#eaf1fb,#9fc2ff);-webkit-background-clip:text;
+  background-clip:text;color:transparent}
+.sub{color:#8aa0c0;font-size:14px;margin-bottom:30px;font-weight:500;letter-spacing:.2px}
+.line{border-collapse:separate;border-spacing:0;margin:0 0 30px;width:100%;
+  font-variant-numeric:tabular-nums;border:1px solid #1c2c48;border-radius:14px;
+  overflow:hidden;box-shadow:0 10px 30px -18px rgba(0,0,0,.8)}
+.line th,.line td{border-bottom:1px solid #16243c;border-right:1px solid #16243c;
+  padding:9px 12px;text-align:center;font-size:13px}
+.line tr td:last-child,.line tr th:last-child{border-right:none}
+.line tbody tr:last-child td{border-bottom:none}
+.line th{color:#7f97ba;background:#0d1729;font-weight:600;font-size:11px;
+  text-transform:uppercase;letter-spacing:.6px}
+.line td.tm{text-align:left;font-weight:700;color:#eaf1fb}
+.line td:nth-last-child(-n+3){font-weight:700;background:rgba(77,148,255,.05)}
+.viz{display:flex;gap:24px;flex-wrap:wrap;margin:0 0 30px;align-items:stretch}
+.card{background:linear-gradient(180deg,#101d33,#0c1727);border:1px solid #1c2c48;
+  border-radius:16px;padding:20px;flex:1;min-width:320px;
+  box-shadow:0 14px 40px -24px rgba(0,0,0,.9)}
+.card h2{font-size:12px;margin:0 0 16px;color:#7f97ba;text-transform:uppercase;
+  letter-spacing:1.4px;font-weight:700}
+.svgbox{max-width:100%}
+.legend{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#9fb4d4;margin-top:12px}
+.dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.kv{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:#9fb4d4;margin-top:12px}
+.kv span{background:#0c1829;border:1px solid #1c2c48;border-radius:999px;padding:4px 11px}
+.kv b{color:#eaf1fb;font-weight:700}
+.nodata{color:#7f97ba;font-size:13px;padding:22px 0;text-align:center}
+.side{margin:0 0 26px}
+.side h2{font-size:12px;margin:22px 0 10px;color:#4d94ff;text-transform:uppercase;
+  letter-spacing:1.4px;font-weight:700;display:flex;align-items:center;gap:10px}
+.side h2::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,#1c2c48,transparent)}
+table.box{width:100%;border-collapse:separate;border-spacing:0;font-size:13px;
+  font-variant-numeric:tabular-nums;border:1px solid #1c2c48;border-radius:14px;
+  overflow:hidden}
+table.box th,table.box td{padding:9px 11px;border-bottom:1px solid #16243c;text-align:right}
+table.box tbody tr:last-child td{border-bottom:none}
+table.box thead th{color:#7f97ba;font-size:10.5px;text-transform:uppercase;
+  letter-spacing:.5px;background:#0d1729;font-weight:700}
 table.box th.l,table.box td.l{text-align:left}
-.foot{color:#6f86a8;font-size:11px;margin-top:24px;border-top:1px solid #1e3050;padding-top:12px}
+table.box td.l{font-weight:600;color:#eaf1fb}
+table.box tbody tr:nth-child(even) td{background:rgba(255,255,255,.018)}
+.foot{color:#6f86a8;font-size:11px;margin-top:30px;border-top:1px solid #16243c;
+  padding-top:14px;letter-spacing:.2px}
+@media print{body{background:#060b16 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 """
 
 
@@ -360,17 +395,18 @@ def build_report_pdf(game_id: int) -> bytes:
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import mm
     from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
-                                    TableStyle, KeepTogether)
+                                    TableStyle, KeepTogether, HRFlowable)
 
     rep = stats.game_report(game_id)
     g = rep["game"]
     ss = getSampleStyleSheet()
-    h1 = ParagraphStyle("h1", parent=ss["Title"], fontSize=18, spaceAfter=2,
+    h1 = ParagraphStyle("h1", parent=ss["Title"], fontSize=23, spaceAfter=3, leading=26,
                         textColor=colors.HexColor("#0b1f3a"))
-    sub = ParagraphStyle("sub", parent=ss["Normal"], fontSize=10,
-                         textColor=colors.HexColor("#5a6b82"), spaceAfter=10)
-    h2 = ParagraphStyle("h2", parent=ss["Heading2"], fontSize=12,
-                        textColor=colors.HexColor("#1c4f8f"), spaceBefore=8, spaceAfter=4)
+    sub = ParagraphStyle("sub", parent=ss["Normal"], fontSize=10.5,
+                         textColor=colors.HexColor("#5a6b82"), spaceAfter=4)
+    h2 = ParagraphStyle("h2", parent=ss["Heading2"], fontSize=10.5, leading=13,
+                        textColor=colors.HexColor("#1c4f8f"), spaceBefore=12, spaceAfter=5,
+                        fontName="Helvetica-Bold")
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=16 * mm, rightMargin=16 * mm,
                             topMargin=15 * mm, bottomMargin=15 * mm,
@@ -380,6 +416,8 @@ def build_report_pdf(game_id: int) -> bytes:
     if g.get("venue"):
         subtxt += " &middot; " + _e(g["venue"])
     story.append(Paragraph(subtxt or "&nbsp;", sub))
+    story.append(HRFlowable(width="100%", thickness=2, color=colors.HexColor("#1c4f8f"),
+                            spaceBefore=4, spaceAfter=14, lineCap="round"))
 
     # line score
     line = rep.get("line") or {}
@@ -394,16 +432,23 @@ def build_report_pdf(game_id: int) -> bytes:
     ldata = [header, lrow(g["away_name"], g["away_name"]), lrow(g["home_name"], g["home_name"])]
     lt = Table(ldata)
     lt.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e9eff7")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.HexColor("#33455e")),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1c4f8f")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
         ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
         ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
         ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
         ("ALIGN", (1, 0), (-1, -1), "CENTER"),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#c3cfe0")),
-        ("BACKGROUND", (-3, 0), (-1, -1), colors.HexColor("#f4f7fb")),
+        ("ALIGN", (0, 0), (0, -1), "LEFT"),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#eef3fb")]),
+        ("LINEBELOW", (0, 0), (-1, 0), 0.8, colors.HexColor("#1c4f8f")),
+        ("LINEBELOW", (0, 1), (-1, -2), 0.3, colors.HexColor("#dce4f0")),
+        ("BACKGROUND", (-3, 1), (-1, -1), colors.HexColor("#f4f7fb")),
+        ("TEXTCOLOR", (-3, 1), (-1, -1), colors.HexColor("#0b1f3a")),
+        ("FONTNAME", (-3, 1), (-1, -1), "Helvetica-Bold"),
     ]))
-    story += [lt, Spacer(1, 10)]
+    story += [lt, Spacer(1, 14)]
 
     # heatmap + spray side by side
     hd = _heatmap_drawing(rep["heatmap"])
@@ -427,11 +472,19 @@ def build_report_pdf(game_id: int) -> bytes:
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1c4f8f")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-            ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ("FONTSIZE", (0, 0), (-1, 0), 7.5),
+            ("FONTSIZE", (0, 1), (-1, -1), 8),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
             ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
             ("ALIGN", (0, 0), (0, -1), "LEFT"),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f2f6fc")]),
-            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#d6dfed")),
+            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+            ("TEXTCOLOR", (0, 1), (0, -1), colors.HexColor("#0b1f3a")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#eef3fb")]),
+            ("LINEBELOW", (0, 0), (-1, 0), 0.8, colors.HexColor("#1c4f8f")),
+            ("LINEBELOW", (0, 1), (-1, -2), 0.25, colors.HexColor("#dce4f0")),
         ]))
         return t
 
@@ -531,27 +584,35 @@ def _stats_title(tab):
 
 
 _STATS_CSS = """
-.rep-header{text-align:center;margin:0 0 24px;padding:4px 0 20px;border-bottom:2px solid #1e3050}
-.rep-header .rh-line{font-size:15px;color:#a8bbd6;line-height:1.55}
-.rep-header .rh-line.lead{font-size:20px;font-weight:800;color:#eaf1fb;letter-spacing:.3px}
-.rep-header .rh-title{margin-top:18px;font-size:27px;font-weight:800;letter-spacing:3px;
-  text-transform:uppercase;color:#4d94ff}
-.rep-header .rh-scope{margin-top:10px;font-size:12px;color:#6f86a8;text-transform:uppercase;letter-spacing:1px}
-.sect{margin:0 0 30px}
-.sect .sect-title{text-align:center;font-size:20px;font-weight:800;letter-spacing:3px;
-  text-transform:uppercase;color:#4d94ff;margin:0 0 14px}
-.card2{background:#0f1b2e;border:1px solid #1e3050;border-radius:14px;padding:18px 20px;
-  box-shadow:0 1px 0 rgba(255,255,255,.02) inset}
-.group-head{text-align:center;font-size:24px;font-weight:800;letter-spacing:4px;
-  text-transform:uppercase;color:#eaf1fb;margin:4px 0 18px;padding-bottom:10px;
-  border-bottom:2px solid #1e3050}
-.lead-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:0 0 34px}
-.lead-card{background:#0f1b2e;border:1px solid #1e3050;border-radius:14px;padding:14px 16px;
-  box-shadow:0 1px 0 rgba(255,255,255,.02) inset;min-width:0}
-.lead-card .lc-title{text-align:center;font-size:14px;font-weight:800;letter-spacing:1.5px;
-  text-transform:uppercase;color:#4d94ff;margin:0 0 10px}
+.rep-header{text-align:center;margin:0 0 30px;padding:6px 0 24px;position:relative}
+.rep-header::after{content:"";position:absolute;left:50%;bottom:0;transform:translateX(-50%);
+  width:120px;height:3px;border-radius:3px;background:linear-gradient(90deg,#4d94ff,#35d07f)}
+.rep-header .rh-line{font-size:15px;color:#9fb4d4;line-height:1.6}
+.rep-header .rh-line.lead{font-size:22px;font-weight:800;color:#eaf1fb;letter-spacing:.2px;margin-bottom:2px}
+.rep-header .rh-title{margin-top:20px;font-size:28px;font-weight:800;letter-spacing:4px;
+  text-transform:uppercase;background:linear-gradient(90deg,#4d94ff,#7fb5ff);
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+.rep-header .rh-scope{margin-top:12px;font-size:11px;color:#7f97ba;text-transform:uppercase;letter-spacing:1.4px}
+.sect{margin:0 0 34px}
+.sect .sect-title{text-align:center;font-size:18px;font-weight:800;letter-spacing:3px;
+  text-transform:uppercase;color:#7fb5ff;margin:0 0 16px}
+.card2{background:linear-gradient(180deg,#101d33,#0c1727);border:1px solid #1c2c48;
+  border-radius:16px;padding:20px 22px;box-shadow:0 14px 40px -24px rgba(0,0,0,.9)}
+.group-head{text-align:center;font-size:22px;font-weight:800;letter-spacing:5px;
+  text-transform:uppercase;color:#eaf1fb;margin:6px 0 22px;padding-bottom:14px;
+  position:relative}
+.group-head::after{content:"";position:absolute;left:50%;bottom:0;transform:translateX(-50%);
+  width:90px;height:3px;border-radius:3px;background:linear-gradient(90deg,#4d94ff,#35d07f)}
+.lead-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin:0 0 38px}
+.lead-card{background:linear-gradient(180deg,#101d33,#0c1727);border:1px solid #1c2c48;
+  border-radius:16px;padding:16px 18px;box-shadow:0 14px 40px -26px rgba(0,0,0,.9);min-width:0;
+  transition:border-color .2s}
+.lead-card .lc-title{text-align:center;font-size:12px;font-weight:800;letter-spacing:1.4px;
+  text-transform:uppercase;color:#7fb5ff;margin:0 0 12px;padding-bottom:10px;
+  border-bottom:1px solid #16243c}
 @media (max-width:900px){.lead-grid{grid-template-columns:repeat(2,1fr)}}
 @media (max-width:620px){.lead-grid{grid-template-columns:1fr}}
+@media print{.lead-grid{grid-template-columns:repeat(3,1fr)}}
 """
 
 
@@ -717,14 +778,14 @@ def _leaders_sections_html(data, tab, team_games, min_pa, min_ip):
             spec, _leaders_rows(data, data.get("batting", []), spec,
                                 team_games, min_pa, min_ip))
             for spec in _LEAD_BAT)
-        parts.append('<div class="group-head">Batters</div>'
+        parts.append('<div class="group-head">Bateadores</div>'
                      '<div class="lead-grid">%s</div>' % cards)
     if tab in ("all", "pitching"):
         cards = "".join(_lead_card_html(
             spec, _leaders_rows(data, data.get("pitching", []), spec,
                                 team_games, min_pa, min_ip))
             for spec in _LEAD_PIT)
-        parts.append('<div class="group-head">Pitchers</div>'
+        parts.append('<div class="group-head">Lanzadores</div>'
                      '<div class="lead-grid">%s</div>' % cards)
     return "".join(parts)
 
@@ -863,12 +924,17 @@ def build_stats_pdf(season_id=None, team_id=None, tab="batting", level="basic",
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, -1), 7.5),
-            ("TOPPADDING", (0, 0), (-1, -1), 3),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+            ("TOPPADDING", (0, 0), (-1, -1), 3.5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 3.5),
+            ("LEFTPADDING", (0, 0), (-1, -1), 5),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 5),
             ("ALIGN", (lead_cols, 0), (-1, -1), "RIGHT"),
             ("ALIGN", (0, 0), (lead_cols - 1, -1), "LEFT"),
-            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#f2f6fc")]),
-            ("GRID", (0, 0), (-1, -1), 0.3, colors.HexColor("#d6dfed")),
+            ("FONTNAME", (0, 1), (0, -1), "Helvetica-Bold"),
+            ("TEXTCOLOR", (0, 1), (0, -1), colors.HexColor("#0b1f3a")),
+            ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#eef3fb")]),
+            ("LINEBELOW", (0, 0), (-1, 0), 0.8, colors.HexColor("#1c4f8f")),
+            ("LINEBELOW", (0, 1), (-1, -2), 0.25, colors.HexColor("#dce4f0")),
         ]))
         return t
 
@@ -973,11 +1039,11 @@ def build_stats_pdf(season_id=None, team_id=None, tab="batting", level="basic",
                             spaceBefore=2, spaceAfter=12))
     if is_leaders:
         if tab in ("all", "batting"):
-            story.append(Paragraph("Batters", group))
+            story.append(Paragraph("Bateadores", group))
             story.append(_leader_grid(_LEAD_BAT))
             story.append(Spacer(1, 8))
         if tab in ("all", "pitching"):
-            story.append(Paragraph("Pitchers", group))
+            story.append(Paragraph("Lanzadores", group))
             story.append(_leader_grid(_LEAD_PIT))
     elif is_all:
         for sub_tab, label in (("batting", "Batting"), ("pitching", "Pitching"),
