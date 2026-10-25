@@ -99,7 +99,13 @@ def import_session_bytes(data: bytes) -> dict:
     conn.execute("PRAGMA foreign_keys = OFF")
     summary: dict[str, int] = {}
     try:
-        conn.execute("BEGIN")
+        # BEGIN IMMEDIATE reserves the write lock up front. A plain (deferred)
+        # BEGIN would start as a reader and only try to upgrade to a writer on
+        # the first INSERT; under WAL that upgrade can fail outright with
+        # SQLITE_BUSY_SNAPSHOT (surfaced as "database is locked") and is NOT
+        # retried by busy_timeout. Taking the lock immediately makes the
+        # busy_timeout wait-and-retry instead.
+        conn.execute("BEGIN IMMEDIATE")
         # Wipe child-first.
         for table in reversed(TABLES):
             if _table_columns(conn, table):
@@ -308,7 +314,13 @@ def import_game(data: bytes) -> dict:
     conn = get_conn()
     conn.commit()
     try:
-        conn.execute("BEGIN")
+        # BEGIN IMMEDIATE (not a plain deferred BEGIN): this transaction reads
+        # (dedup lookups) BEFORE it writes, so a deferred begin would take a
+        # read snapshot and then fail to upgrade to a writer with
+        # SQLITE_BUSY_SNAPSHOT ("database is locked") whenever another request
+        # wrote in between -- and that error is not covered by busy_timeout.
+        # Reserving the write lock immediately lets busy_timeout wait instead.
+        conn.execute("BEGIN IMMEDIATE")
         result = _import_game_tx(conn, payload)
         conn.execute("COMMIT")
     except Exception:
