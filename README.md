@@ -1,65 +1,21 @@
 # Diamond Scorer
 
-An MLB-grade baseball scoring, statistics and analytics desktop application.
+An MLB-grade baseball scoring, statistics and analytics web application.
 
 - **Backend:** Python + FastAPI + SQLite (single local database file)
 - **Frontend:** modern dark-blue single-page UI (HTML/CSS/JS, no build step)
-- **Desktop shell:** native window via `pywebview`; binds to `127.0.0.1` only
-- **Packaging:** single Windows `.exe` via PyInstaller (`build_windows_exe.bat`)
+- **Delivery:** pure web app; runs in any browser, binds to `127.0.0.1` only
 
-## Run (development)
-
-```bash
-pip install -r requirements.txt
-python main.py
-```
-
-If `pywebview` is installed it opens a native window. In a headless environment
-it falls back to printing a local URL you can open in a browser.
-
-## Build the Windows executable
-
-**64-bit Windows (default):**
-
-```bat
-build_windows_exe.bat
-```
-
-**32-bit Windows (also runs on 64-bit):**
-
-```bat
-build_windows_exe_32bit.bat
-```
-
-PyInstaller always produces an `.exe` that matches the architecture of the
-Python interpreter used to build it, so the 32-bit script must be run with a
-32-bit (x86) build of Python. Just double-click `build_windows_exe_32bit.bat`:
-it automatically locates a 32-bit interpreter (preferring the `py -3-32`
-launcher), refuses to continue if only a 64-bit Python is found, and keeps the
-window open at the end so you can read the result. See the comments at the top
-of the script for how to install 32-bit Python. A 32-bit executable is the most
-broadly compatible: it runs on **both** 32-bit and 64-bit Windows. The app code
-itself is pure Python and architecture-independent, and all dependencies ship
-32-bit (`win32`) wheels.
-
-For the native window, the app prefers the modern WebView2 renderer and
-automatically falls back to the built-in MSHTML (Internet Explorer) engine on
-older machines that lack the WebView2 runtime, so no extra runtime install is
-required on legacy 32-bit systems.
-
-The app is fully offline and never exposes a network service.
-
-## Run as a web app (browser mode)
-
-Diamond Scorer is already a web application internally (FastAPI backend + a
-single-page frontend). The desktop build simply wraps that in a native window.
-To use it in an ordinary browser instead -- for local use or a self-hosted
-deployment -- run the web entry point:
+## Run
 
 ```bash
 pip install -r requirements.txt
 python run_web.py                 # serves http://127.0.0.1:8000
 ```
+
+The server prints a local URL and (on localhost) opens your default browser
+automatically. The app is fully self-contained and, by default, exposes no
+service beyond the local machine.
 
 macOS / Linux users can instead run `./run_web.sh`, which creates a local
 virtualenv, installs dependencies, and starts the server. Override the address

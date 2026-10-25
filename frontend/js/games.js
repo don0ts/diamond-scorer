@@ -25,11 +25,15 @@ const Games = (() => {
         style="display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap">
         <label style="display:flex;gap:8px;align-items:center">Season
           <select id="gm-season" style="min-width:260px">${seasonOpts}</select></label>
-        <button class="btn primary" id="gm-new">+ New Game</button>
+        <span style="display:flex;gap:8px">
+          <button class="btn" id="gm-import">⬇ Import Games</button>
+          <button class="btn primary" id="gm-new">+ New Game</button>
+        </span>
       </div></div>
       <div id="gm-list"></div>`;
     r.querySelector('#gm-season').onchange = (e) => { state.seasonId = Number(e.target.value); render(r); };
     r.querySelector('#gm-new').onclick = () => newGame();
+    r.querySelector('#gm-import').onclick = () => importGames(r);
     await renderList(r.querySelector('#gm-list'));
   }
 
@@ -63,11 +67,13 @@ const Games = (() => {
         <div class="card-row" style="margin-top:10px"><span></span><span class="row-actions">
           <button class="btn sm primary" data-score="${g.id}">Score</button>
           <button class="btn sm" data-report="${g.id}">Report</button>
+          <button class="btn sm" data-export="${g.id}">Export</button>
           <button class="btn sm danger" data-del="${g.id}">Delete</button>
         </span></div></div>`;
     }).join('') + `</div>`;
     host.querySelectorAll('[data-score]').forEach((b) => b.onclick = () => Scorer.open(Number(b.dataset.score)));
     host.querySelectorAll('[data-report]').forEach((b) => b.onclick = () => Report.open(Number(b.dataset.report)));
+    host.querySelectorAll('[data-export]').forEach((b) => b.onclick = () => exportGame(Number(b.dataset.export)));
     host.querySelectorAll('[data-del]').forEach((b) => b.onclick = async () => {
       const g = games.find((x) => x.id == b.dataset.del);
       if (await UI.confirm('Delete game', `Delete ${g.away_name} @ ${g.home_name}? This removes all recorded plays.`,
@@ -106,6 +112,49 @@ const Games = (() => {
     const g = await API.post('/games', body);
     UI.toast('Game created');
     Scorer.open(g.id);
+  }
+
+  // ---- Per-game export / import ----
+  function exportGame(id) {
+    // Browser download of the portable single-game .zip.
+    const a = document.createElement('a');
+    a.href = `/api/games/${id}/export.zip`;
+    a.download = '';
+    document.body.appendChild(a); a.click(); a.remove();
+    UI.toast('Exporting game\u2026');
+  }
+
+  async function importGames(r) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.zip,application/zip';
+    input.multiple = true;
+    input.onchange = async () => {
+      const files = Array.from(input.files || []);
+      if (!files.length) return;
+      let ok = 0, dup = 0, fail = 0;
+      for (const file of files) {
+        const fd = new FormData();
+        fd.append('file', file, file.name);
+        try {
+          const res = await fetch('/api/games/import', { method: 'POST', body: fd });
+          if (!res.ok) {
+            let detail = res.statusText;
+            try { const j = await res.json(); detail = j.detail || detail; } catch (e) {}
+            throw new Error(detail);
+          }
+          const j = await res.json();
+          if (j && j.duplicate) dup++; else ok++;
+        } catch (e) { fail++; UI.toast(`${file.name}: ${e.message || 'import failed'}`, 'err'); }
+      }
+      const bits = [];
+      if (ok) bits.push(`${ok} imported`);
+      if (dup) bits.push(`${dup} already present`);
+      if (fail) bits.push(`${fail} failed`);
+      UI.toast(bits.join(' \u00b7 ') || 'Nothing imported', fail && !ok ? 'err' : 'ok');
+      render(r);
+    };
+    input.click();
   }
 
   return { render, state };

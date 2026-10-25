@@ -512,6 +512,46 @@ def api_export_pdf(game_id: int):
         "Content-Disposition": f'attachment; filename="{fn}"'})
 
 
+def _game_zip_filename(game_id: int) -> str:
+    g = repo_games.get_game(game_id)
+    if not g:
+        raise HTTPException(404, "Game not found")
+    import re
+    slug = re.sub(r"[^A-Za-z0-9]+", "_",
+                  f"{g['away_name']}_at_{g['home_name']}").strip("_")
+    date = (g.get("game_date") or "").replace("-", "")
+    return f"{slug or 'game'}{('_' + date) if date else ''}.dsgame.zip"
+
+
+@router.get("/games/{game_id}/export.zip")
+def api_export_game_zip(game_id: int):
+    """Download a single game (plus its league/season/teams/players/rosters,
+    lineups, events and pitches) as a portable .zip."""
+    fn = _game_zip_filename(game_id)
+    try:
+        data = session_io.export_game_bytes(game_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc))
+    return Response(content=data, media_type="application/zip", headers={
+        "Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+@router.post("/games/import")
+async def api_import_game(file: UploadFile = File(...)):
+    """Load a single-game .zip, de-duplicating existing profiles (players,
+    teams, leagues, seasons) and remapping all ids to this database."""
+    try:
+        data = await file.read()
+    except Exception as exc:
+        raise HTTPException(400, f"Could not read uploaded file: {exc}")
+    try:
+        return session_io.import_game(data)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    except Exception as exc:
+        raise HTTPException(500, f"Import failed: {exc}")
+
+
 def _exports_dir():
     """User-visible folder for saved reports.
 

@@ -1,9 +1,8 @@
 """Diamond Scorer -- web (browser) entry point.
 
-Runs the exact same FastAPI backend + single-page frontend as the desktop
-build, but without the native ``pywebview`` window. Use this when you want to
-open Diamond Scorer in an ordinary web browser (local use, a shared workstation,
-or a self-hosted deployment behind your own reverse proxy).
+Runs the FastAPI backend + single-page frontend and serves them to an ordinary
+web browser (local use, a shared workstation, or a self-hosted deployment
+behind your own reverse proxy). This is the single entry point for the app.
 
 SECURITY NOTE
 -------------

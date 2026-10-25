@@ -330,12 +330,12 @@ const Statistics = (() => {
 
   function leadersHtml() {
     const groups = [];
-    if (state.tab === 'all' || state.tab === 'batting') groups.push(['batting', LEAD_BAT]);
-    if (state.tab === 'all' || state.tab === 'pitching') groups.push(['pitching', LEAD_PIT]);
-    const cards = [];
-    groups.forEach(([poolKey, specs]) => {
+    if (state.tab === 'all' || state.tab === 'batting') groups.push(['batting', LEAD_BAT, 'Batters']);
+    if (state.tab === 'all' || state.tab === 'pitching') groups.push(['pitching', LEAD_PIT, 'Pitchers']);
+    const out = [];
+    groups.forEach(([poolKey, specs, heading]) => {
       const pool = state.data[poolKey] || [];
-      specs.forEach((spec) => {
+      const cards = specs.map((spec) => {
         const top = topFive(pool, spec);
         const rws = top.map((r, i) =>
           `<tr><td class="lft muted">${i+1}</td><td class="lft">${UI.esc(r.name)}</td>` +
@@ -343,10 +343,11 @@ const Statistics = (() => {
         const inner = top.length
           ? `<table class="tbl stat-tbl"><thead><tr><th class="lft">#</th><th class="lft">Player</th><th class="lft">Tm</th><th>Value</th></tr></thead><tbody>${rws}</tbody></table>`
           : '<p class="muted">No qualifying players.</p>';
-        cards.push(`<section class="st-card" style="margin-bottom:16px"><div class="panel"><div class="panel-head"><h2 style="margin:0;font-size:15px">${spec[0]}</h2></div><div class="panel-body"><div class="st-scroll">${inner}</div></div></div></section>`);
-      });
+        return `<section class="st-card"><div class="panel"><div class="panel-head"><h2 style="margin:0;font-size:14px">${spec[0]}</h2></div><div class="panel-body"><div class="st-scroll">${inner}</div></div></div></section>`;
+      }).join('');
+      out.push(`<div class="lead-group-head">${heading}</div><div class="lead-grid">${cards}</div>`);
     });
-    return cards.join('') || UI.empty('\ud83c\udfc6', 'No leaders to show yet.');
+    return out.join('') || UI.empty('\ud83c\udfc6', 'No leaders to show yet.');
   }
 
   function openMinModal() {

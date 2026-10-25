@@ -542,6 +542,16 @@ _STATS_CSS = """
   text-transform:uppercase;color:#4d94ff;margin:0 0 14px}
 .card2{background:#0f1b2e;border:1px solid #1e3050;border-radius:14px;padding:18px 20px;
   box-shadow:0 1px 0 rgba(255,255,255,.02) inset}
+.group-head{text-align:center;font-size:24px;font-weight:800;letter-spacing:4px;
+  text-transform:uppercase;color:#eaf1fb;margin:4px 0 18px;padding-bottom:10px;
+  border-bottom:2px solid #1e3050}
+.lead-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:0 0 34px}
+.lead-card{background:#0f1b2e;border:1px solid #1e3050;border-radius:14px;padding:14px 16px;
+  box-shadow:0 1px 0 rgba(255,255,255,.02) inset;min-width:0}
+.lead-card .lc-title{text-align:center;font-size:14px;font-weight:800;letter-spacing:1.5px;
+  text-transform:uppercase;color:#4d94ff;margin:0 0 10px}
+@media (max-width:900px){.lead-grid{grid-template-columns:repeat(2,1fr)}}
+@media (max-width:620px){.lead-grid{grid-template-columns:1fr}}
 """
 
 
@@ -696,22 +706,26 @@ def _lead_card_html(spec, rows):
         inner = ('<table class="box"><thead><tr><th class="l">#</th>'
                  '<th class="l">Player</th><th class="l">Tm</th>'
                  '<th>Value</th></tr></thead><tbody>%s</tbody></table>' % body)
-    return ('<div class="sect"><div class="sect-title">%s</div>'
-            '<div class="card2">%s</div></div>' % (_e(label.upper()), inner))
+    return ('<div class="lead-card"><div class="lc-title">%s</div>%s</div>'
+            % (_e(label.upper()), inner))
 
 
 def _leaders_sections_html(data, tab, team_games, min_pa, min_ip):
     parts = []
     if tab in ("all", "batting"):
-        for spec in _LEAD_BAT:
-            parts.append(_lead_card_html(
-                spec, _leaders_rows(data, data.get("batting", []), spec,
-                                    team_games, min_pa, min_ip)))
+        cards = "".join(_lead_card_html(
+            spec, _leaders_rows(data, data.get("batting", []), spec,
+                                team_games, min_pa, min_ip))
+            for spec in _LEAD_BAT)
+        parts.append('<div class="group-head">Batters</div>'
+                     '<div class="lead-grid">%s</div>' % cards)
     if tab in ("all", "pitching"):
-        for spec in _LEAD_PIT:
-            parts.append(_lead_card_html(
-                spec, _leaders_rows(data, data.get("pitching", []), spec,
-                                    team_games, min_pa, min_ip)))
+        cards = "".join(_lead_card_html(
+            spec, _leaders_rows(data, data.get("pitching", []), spec,
+                                team_games, min_pa, min_ip))
+            for spec in _LEAD_PIT)
+        parts.append('<div class="group-head">Pitchers</div>'
+                     '<div class="lead-grid">%s</div>' % cards)
     return "".join(parts)
 
 
@@ -836,9 +850,14 @@ def build_stats_pdf(season_id=None, team_id=None, tab="batting", level="basic",
                            textColor=colors.HexColor("#7a8aa0"), spaceBefore=6, spaceAfter=4)
     sect = ParagraphStyle("sect", parent=ss["Title"], fontSize=16, alignment=TA_CENTER,
                           textColor=colors.HexColor("#1c4f8f"), spaceBefore=10, spaceAfter=6)
+    group = ParagraphStyle("group", parent=ss["Title"], fontSize=20, alignment=TA_CENTER,
+                           textColor=colors.HexColor("#0b1f3a"), spaceBefore=6, spaceAfter=10)
+    ctitle = ParagraphStyle("ctitle", parent=ss["Normal"], fontSize=9, alignment=TA_CENTER,
+                            fontName="Helvetica-Bold", spaceAfter=3,
+                            textColor=colors.HexColor("#1c4f8f"))
 
-    def _table(tdata, lead_cols):
-        t = Table(tdata, repeatRows=1)
+    def _table(tdata, lead_cols, colWidths=None):
+        t = Table(tdata, repeatRows=1, colWidths=colWidths)
         t.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#1c4f8f")),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -880,6 +899,40 @@ def build_stats_pdf(season_id=None, team_id=None, tab="batting", level="basic",
             tdata.append([str(i), str(nm), str(tm), str(val)])
         return _table(tdata, 3)
 
+    def _leader_cell(spec):
+        """A mini leader card: category title + its top-5 table, for the grid."""
+        pool = (data.get("batting", []) if spec in _LEAD_BAT
+                else data.get("pitching", []))
+        rows = _leaders_rows(data, pool, spec, data.get("team_games", {}),
+                             min_pa, min_ip)
+        title = Paragraph(_e(spec[0].upper()), ctitle)
+        if not rows:
+            return [title, Paragraph("No qualifying players.", meta)]
+        tdata = [["#", "Player", "Tm", "Value"]]
+        for i, (nm, tm, val) in enumerate(rows, 1):
+            tdata.append([str(i), str(nm), str(tm), str(val)])
+        return [title, _table(tdata, 3, colWidths=[13, 150, 34, 40])]
+
+    def _leader_grid(specs):
+        """Arrange leader cards up to 3 per row as an outer table."""
+        cells = [_leader_cell(s) for s in specs]
+        grid = []
+        for i in range(0, len(cells), 3):
+            chunk = cells[i:i + 3]
+            while len(chunk) < 3:
+                chunk.append("")
+            grid.append(chunk)
+        col_w = doc.width / 3.0
+        gt = Table(grid, colWidths=[col_w] * 3)
+        gt.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 4),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+            ("TOPPADDING", (0, 0), (-1, -1), 4),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+        ]))
+        return gt
+
     def _standings_table():
         cols = _SSTAND
         header = ["#", "Team"] + [l for _, l, _ in cols]
@@ -919,15 +972,13 @@ def build_stats_pdf(season_id=None, team_id=None, tab="batting", level="basic",
     story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#c3cfe0"),
                             spaceBefore=2, spaceAfter=12))
     if is_leaders:
-        specs = []
         if tab in ("all", "batting"):
-            specs += _LEAD_BAT
+            story.append(Paragraph("Batters", group))
+            story.append(_leader_grid(_LEAD_BAT))
+            story.append(Spacer(1, 8))
         if tab in ("all", "pitching"):
-            specs += _LEAD_PIT
-        for spec in specs:
-            story.append(Paragraph(_e(spec[0].upper()), sect))
-            story.append(_leader_table(spec))
-            story.append(Spacer(1, 10))
+            story.append(Paragraph("Pitchers", group))
+            story.append(_leader_grid(_LEAD_PIT))
     elif is_all:
         for sub_tab, label in (("batting", "Batting"), ("pitching", "Pitching"),
                                ("fielding", "Fielding")):
